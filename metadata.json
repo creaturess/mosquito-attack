@@ -1,0 +1,6 @@
+{
+  "name": "Mosquito Attack",
+  "description": "Experiencia web inmersiva móvil 3D con giroscopio, audio espacial y detección de micrófono.",
+  "requestFramePermissions": ["camera", "microphone", "accelerometer", "gyroscope"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
