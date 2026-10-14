@@ -1,10 +1,11 @@
 /**
  * UIOverlay.tsx
  * Top bar sensor indicators, VU-meter, live timer, kill counter,
- * Level 3 Boss Scream Meter, crosshair swat reticle, and AR mode toggle.
+ * Level 3 Boss Scream Meter, crosshair swat reticle, AR mode toggle,
+ * and 6DOF Spatial Motion controls & distance indicator.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Compass,
   Mic,
@@ -17,8 +18,13 @@ import {
   Skull,
   Flame,
   Radio,
+  ChevronUp,
+  ChevronDown,
+  Move3d,
+  RotateCcw,
+  Sliders,
 } from 'lucide-react';
-import { SensorStatus } from '../sensors/SensorManager';
+import { SensorStatus, sensorManager } from '../sensors/SensorManager';
 import { GameState } from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
@@ -29,6 +35,7 @@ interface UIOverlayProps {
   isScreaming: boolean;
   onToggleAR: () => void;
   onCalibrateGyro: () => void;
+  forwardDistance?: number;
 }
 
 export const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -38,9 +45,14 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   isScreaming,
   onToggleAR,
   onCalibrateGyro,
+  forwardDistance = 0,
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
+  const [sensitivityMode, setSensitivityMode] = useState<'normal' | 'high' | 'ultra'>('high');
+  const [showSensitivityMenu, setShowSensitivityMenu] = useState(false);
+
+  const holdIntervalRef = useRef<number | null>(null);
 
   const toggleMute = () => {
     const nextMute = !isMuted;
@@ -48,7 +60,34 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
     buzzManager.setMuted(nextMute);
   };
 
-  // Listen to screen taps to show brief slap animation
+  const handleSetSensitivity = (mode: 'normal' | 'high' | 'ultra') => {
+    setSensitivityMode(mode);
+    if (mode === 'normal') sensorManager.motionSensitivity = 1.6;
+    if (mode === 'high') sensorManager.motionSensitivity = 2.6;
+    if (mode === 'ultra') sensorManager.motionSensitivity = 3.8;
+  };
+
+  // Hold-to-walk handlers for on-screen touch pedals
+  const startWalking = (direction: 'forward' | 'backward') => {
+    const step = direction === 'forward' ? 0.22 : -0.22;
+    sensorManager.moveForward(step);
+    sensorManager.triggerHaptic('step');
+
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    holdIntervalRef.current = window.setInterval(() => {
+      sensorManager.moveForward(step);
+      sensorManager.triggerHaptic('step');
+    }, 120);
+  };
+
+  const stopWalking = () => {
+    if (holdIntervalRef.current) {
+      clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  };
+
+  // Screen click/tap slap visual feedback
   useEffect(() => {
     const handleTap = (e: MouseEvent | TouchEvent) => {
       let x = 0;
@@ -80,21 +119,29 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 select-none">
       {/* --- TOP STATUS BAR --- */}
-      <header className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-900/80 p-2.5 backdrop-blur-md shadow-xl">
+      <header className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2.5 backdrop-blur-md shadow-xl">
         {/* Left: Sensor badges */}
         <div className="flex items-center gap-2">
-          {/* Gyroscope Indicator */}
+          {/* Gyroscope & Motion Indicator */}
           <button
             onClick={onCalibrateGyro}
-            title="Centrar Giroscopio"
+            title="Centrar orientación y posición"
             className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-950/40 px-2.5 py-1 text-xs font-medium text-cyan-300 transition hover:bg-cyan-900/60 active:scale-95"
           >
-            <Compass className="h-3.5 w-3.5 animate-spin" style={{ animationDuration: '6s' }} />
-            <span className="hidden sm:inline">Giroscopio</span>
-            <span className="text-[10px] text-cyan-400 font-mono">
-              {sensorStatus.gyroscopeActive ? 'ACTIVO' : 'MANUAL'}
+            <Move3d className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
+            <span className="hidden sm:inline">Tracking 6DOF</span>
+            <span className="text-[10px] text-cyan-300 font-mono font-bold">
+              {sensorStatus.motionActive || sensorStatus.gyroscopeActive ? 'ACTIVO' : 'MANUAL'}
             </span>
           </button>
+
+          {/* Spatial forward/backward displacement tag */}
+          <div className="hidden xs:flex items-center gap-1 rounded-xl border border-blue-500/30 bg-blue-950/40 px-2 py-1 text-[11px] font-mono text-blue-300">
+            <span>Avance:</span>
+            <span className={forwardDistance >= 0.1 ? 'text-emerald-400 font-bold' : forwardDistance <= -0.1 ? 'text-amber-400 font-bold' : 'text-slate-300'}>
+              {forwardDistance > 0 ? `+${forwardDistance.toFixed(1)}m` : `${forwardDistance.toFixed(1)}m`}
+            </span>
+          </div>
 
           {/* Mic VU-Meter */}
           <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1 text-xs text-emerald-300">
@@ -124,8 +171,39 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         </div>
 
-        {/* Right: Controls (AR Mode & Mute) */}
+        {/* Right: Controls (Sensitivity, AR Mode & Mute) */}
         <div className="flex items-center gap-2">
+          {/* Motion Sensitivity Menu */}
+          <div className="relative pointer-events-auto">
+            <button
+              onClick={() => setShowSensitivityMenu(!showSensitivityMenu)}
+              className="flex items-center gap-1 rounded-xl border border-white/10 bg-slate-800/80 px-2 py-1 text-xs text-slate-300 transition hover:bg-slate-700 active:scale-95"
+              title="Ajustar sensibilidad de movimiento"
+            >
+              <Sliders className="h-3 w-3" />
+              <span className="text-[10px] uppercase font-bold">{sensitivityMode}</span>
+            </button>
+            {showSensitivityMenu && (
+              <div className="absolute right-0 top-full mt-1 flex flex-col gap-1 rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl z-30 min-w-28">
+                <span className="text-[10px] text-slate-400 px-2 py-0.5 font-semibold">Sensibilidad</span>
+                {(['normal', 'high', 'ultra'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      handleSetSensitivity(mode);
+                      setShowSensitivityMenu(false);
+                    }}
+                    className={`rounded-lg px-2 py-1 text-left text-xs font-medium transition capitalize ${
+                      sensitivityMode === mode ? 'bg-rose-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {mode === 'normal' ? 'Normal (1.6x)' : mode === 'high' ? 'Alta (2.6x)' : 'Ultra (3.8x)'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button
             onClick={onToggleAR}
             className={`pointer-events-auto flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition active:scale-95 ${
@@ -231,12 +309,52 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* Bottom helper tip */}
-      <footer className="flex justify-center pb-2">
-        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3.5 py-1 text-center text-xs text-slate-300 backdrop-blur-sm">
-          <span>🎧 Usa auriculares para escuchar la posición 3D del zumbido</span>
-          <span className="text-slate-500">•</span>
-          <span>Toca la pantalla para aplastarlo</span>
+      {/* --- BOTTOM CONTROLS: SPATIAL PEDALS & TIPS --- */}
+      <footer className="flex flex-col items-center gap-2 pb-1">
+        {/* On-screen touch motion pedals (Avanzar / Retroceder) */}
+        <div className="flex items-center justify-between w-full max-w-sm px-2 pointer-events-auto">
+          {/* Movement Pedals */}
+          <div className="flex items-center gap-1.5 rounded-2xl border border-white/10 bg-black/60 p-1 backdrop-blur-md shadow-lg">
+            <button
+              onPointerDown={() => startWalking('forward')}
+              onPointerUp={stopWalking}
+              onPointerLeave={stopWalking}
+              className="flex items-center gap-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:bg-rose-600 px-3 py-2 text-xs font-bold text-white transition active:scale-95"
+              title="Avanzar en el espacio (también puedes mover el teléfono hacia adelante o usar tecla W)"
+            >
+              <ChevronUp className="h-4 w-4 text-emerald-400" />
+              <span>Avanzar</span>
+            </button>
+            <button
+              onPointerDown={() => startWalking('backward')}
+              onPointerUp={stopWalking}
+              onPointerLeave={stopWalking}
+              className="flex items-center gap-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:bg-rose-600 px-3 py-2 text-xs font-bold text-white transition active:scale-95"
+              title="Retroceder en el espacio (también puedes alejar el teléfono o usar tecla S)"
+            >
+              <ChevronDown className="h-4 w-4 text-cyan-400" />
+              <span>Retroceder</span>
+            </button>
+          </div>
+
+          {/* Quick Recenter Button */}
+          <button
+            onClick={onCalibrateGyro}
+            className="flex items-center gap-1 rounded-2xl border border-white/10 bg-black/60 px-3 py-2.5 text-xs text-slate-300 hover:text-white backdrop-blur-md transition active:scale-95"
+            title="Re-centrar posición al origen"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span className="text-[11px]">Centrar</span>
+          </button>
+        </div>
+
+        {/* Dynamic Tip */}
+        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/65 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg">
+          <span className="text-cyan-400 font-semibold flex items-center gap-1">
+            🎧 Sigue el zumbido 3D para ubicar a los mosquitos en la habitación
+          </span>
+          <span className="text-slate-500 hidden sm:inline">•</span>
+          <span className="text-slate-300 hidden sm:inline">Avanza con tu celular hacia ellos y toca para aplastar</span>
         </div>
       </footer>
     </div>

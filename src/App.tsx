@@ -14,8 +14,8 @@ import { sensorManager, SensorStatus } from './sensors/SensorManager';
 import { buzzManager } from './audio/SpatialBuzzManager';
 
 const LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
-  1: 30, // 30 seconds for Level 1
-  2: 25, // 25 seconds for Level 2
+  1: 60, // 60 seconds for Level 1
+  2: 50, // 50 seconds for Level 2 (20 agile mosquitoes across bedroom)
   3: 20, // 20 seconds for Level 3
 };
 
@@ -45,6 +45,7 @@ export default function App() {
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
     gyroscopeAllowed: false,
     gyroscopeActive: false,
+    motionActive: false,
     micAllowed: false,
     micActive: false,
     cameraAllowed: false,
@@ -53,12 +54,13 @@ export default function App() {
 
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isScreaming, setIsScreaming] = useState(false);
+  const [forwardDistance, setForwardDistance] = useState(0);
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const timerIntervalRef = useRef<number | null>(null);
 
-  // Poll sensor volume and status for UI HUD
+  // Poll sensor volume, spatial position and status for UI HUD
   useEffect(() => {
     let animId: number;
     let frameCounter = 0;
@@ -68,10 +70,11 @@ export default function App() {
       frameCounter++;
       // Poll at ~20Hz for UI HUD smoothness
       if (frameCounter % 3 === 0) {
-        const { audio, status } = sensorManager.update();
+        const { audio, status, position } = sensorManager.update();
         setCurrentVolume(audio.volume);
         setIsScreaming(audio.isScreaming);
         setSensorStatus(status);
+        setForwardDistance(position.forwardDistance);
       }
     };
 
@@ -255,6 +258,7 @@ export default function App() {
         isScreaming={isScreaming}
         onToggleAR={handleToggleAR}
         onCalibrateGyro={handleCalibrateGyro}
+        forwardDistance={forwardDistance}
       />
 
       {/* Onboarding & Sensor Permissions Modal */}

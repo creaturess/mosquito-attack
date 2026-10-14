@@ -9,6 +9,7 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Mosquito } from '../entities/Mosquito';
 import { ParticleSystem } from '../entities/ParticleSystem';
+import { RoomEnvironment } from '../entities/RoomEnvironment';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
@@ -81,7 +82,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       0.1,
       100
     );
-    camera.position.set(0, 0, 0);
+    camera.position.set(0.2, 1.6, 1.4);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
@@ -92,61 +93,19 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    // --- 2. Lighting ---
-    // Ambient moonlit blue tint
-    const ambientLight = new THREE.AmbientLight(0x243354, 0.9);
-    scene.add(ambientLight);
-
-    // Flashlight attached to camera
-    const flashlight = new THREE.SpotLight(0xfff7e6, 3.5, 25, Math.PI / 4, 0.5, 1.2);
+    // --- 2. Lighting & Flashlight ---
+    // Flashlight attached to camera (player's phone light)
+    const flashlight = new THREE.SpotLight(0xfffaec, 2.6, 16, Math.PI / 4, 0.45, 1.3);
     flashlight.position.set(0, 0, 0);
     camera.add(flashlight);
     flashlight.target.position.set(0, 0, -1);
     camera.add(flashlight.target);
     scene.add(camera);
 
-    // --- 3. Room Environment (Visible in Non-AR Mode) ---
+    // --- 3. Aesthetic Gaming Bedroom (from reference image) ---
     const roomGroup = new THREE.Group();
-
-    // Dark bedroom cube with subtle grid wallpaper & furniture silhouettes
-    const roomGeo = new THREE.BoxGeometry(22, 14, 22);
-    const roomMat = new THREE.MeshStandardMaterial({
-      color: 0x090e1a,
-      roughness: 0.9,
-      metalness: 0.1,
-      side: THREE.BackSide,
-    });
-    const roomMesh = new THREE.Mesh(roomGeo, roomMat);
-    roomGroup.add(roomMesh);
-
-    // Floor texture
-    const floorGeo = new THREE.PlaneGeometry(22, 22);
-    floorGeo.rotateX(-Math.PI / 2);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x05070f,
-      roughness: 0.7,
-    });
-    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-    floorMesh.position.y = -6.9;
-    roomGroup.add(floorMesh);
-
-    // Window with dim moonlight silhouette
-    const windowGeo = new THREE.PlaneGeometry(4, 5);
-    const windowMat = new THREE.MeshBasicMaterial({
-      color: 0x1e3a5f,
-      side: THREE.DoubleSide,
-    });
-    const windowMesh = new THREE.Mesh(windowGeo, windowMat);
-    windowMesh.position.set(0, 0.5, -10.9);
-    roomGroup.add(windowMesh);
-
-    // Ceiling fan silhouette
-    const fanCenterGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 12);
-    const fanMat = new THREE.MeshBasicMaterial({ color: 0x111827 });
-    const fanCenter = new THREE.Mesh(fanCenterGeo, fanMat);
-    fanCenter.position.set(0, 6.8, 0);
-    roomGroup.add(fanCenter);
-
+    const bedroom = new RoomEnvironment();
+    roomGroup.add(bedroom.group);
     scene.add(roomGroup);
 
     // --- 4. Video Texture for AR Camera (when active) ---
@@ -191,25 +150,66 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let accumulatedScreamTime = 0;
     let bossInstance: Mosquito | null = null;
 
+    // 8 distinct room sectors spanning the ENTIRE bedroom:
+    const BEDROOM_SPAWN_SECTORS = [
+      // 1. Over the floating bed & pillows (Back-Left)
+      new THREE.Vector3(-2.2, 1.4, -2.4),
+      // 2. High Wall Shelves & Hanging Plant (Top-Left Wall)
+      new THREE.Vector3(-3.5, 2.9, -1.2),
+      // 3. Curved Ultrawide Monitor & Desk (Back-Right)
+      new THREE.Vector3(1.6, 1.5, -2.5),
+      // 4. Glowing RGB PC Tower & Far Right Corner
+      new THREE.Vector3(3.4, 1.8, -1.6),
+      // 5. High Ceiling Center (Above the room)
+      new THREE.Vector3(0.0, 3.2, -0.4),
+      // 6. Behind Player, Left Corner / Curtains
+      new THREE.Vector3(-3.2, 1.6, 2.6),
+      // 7. Behind Player, Right Entrance Door Corner
+      new THREE.Vector3(3.0, 1.5, 2.8),
+      // 8. Low near Gamer Chair Wheels & Floor
+      new THREE.Vector3(1.3, 0.75, -0.6),
+    ];
+
     // Helper to spawn a mosquito
-    const spawnMosquito = (isBoss: boolean = false) => {
+    const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number) => {
       const id = `mosquito_${nextMosquitoId++}`;
+      const currentLvl = stateRef.current.currentLevel;
       let scale = 0.85;
       let speed = 1.0;
+      let initialPosition: THREE.Vector3 | undefined = undefined;
 
-      if (stateRef.current.currentLevel === 1) {
-        scale = 0.9;
-        speed = 1.1;
-      } else if (stateRef.current.currentLevel === 2) {
-        scale = 0.65; // Smaller
-        speed = 1.6; // Faster
-      } else if (stateRef.current.currentLevel === 3) {
+      if (currentLvl === 1) {
+        scale = 1.0; // Clear, easy to spot when close
+        speed = 0.52; // Moving slowly as requested
+        // Pick one of the 8 bedroom sectors to guarantee full dispersal across the room
+        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length);
+        const basePos = BEDROOM_SPAWN_SECTORS[secIdx % BEDROOM_SPAWN_SECTORS.length];
+        initialPosition = new THREE.Vector3(
+          Math.max(-3.8, Math.min(3.8, basePos.x + (Math.random() - 0.5) * 0.6)),
+          Math.max(0.7, Math.min(3.3, basePos.y + (Math.random() - 0.5) * 0.4)),
+          Math.max(-3.6, Math.min(3.6, basePos.z + (Math.random() - 0.5) * 0.6))
+        );
+      } else if (currentLvl === 2) {
+        scale = 0.72; // Un poco más pequeños que los del nivel 1
+        speed = 0.92; // Un poco más rápidos y ágiles que los del nivel 1
+        // Dispersed across all 8 sectors of the bedroom
+        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length);
+        const basePos = BEDROOM_SPAWN_SECTORS[secIdx % BEDROOM_SPAWN_SECTORS.length];
+        initialPosition = new THREE.Vector3(
+          Math.max(-3.8, Math.min(3.8, basePos.x + (Math.random() - 0.5) * 0.7)),
+          Math.max(0.7, Math.min(3.3, basePos.y + (Math.random() - 0.5) * 0.5)),
+          Math.max(-3.6, Math.min(3.6, basePos.z + (Math.random() - 0.5) * 0.7))
+        );
+      } else if (currentLvl === 3) {
         if (isBoss) {
           scale = 3.6; // Giant Final Boss
           speed = 0.6;
+          initialPosition = new THREE.Vector3(0.0, 2.0, -1.8);
         } else {
-          scale = Math.random() > 0.5 ? 0.85 : 0.65;
-          speed = 1.3;
+          scale = 0.72;
+          speed = 0.92;
+          const basePos = BEDROOM_SPAWN_SECTORS[Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length)];
+          initialPosition = new THREE.Vector3(basePos.x, basePos.y, basePos.z);
         }
       }
 
@@ -218,7 +218,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         isBoss,
         scale,
         speed,
-        spawnDistance: isBoss ? 5.2 : 3.8 + Math.random() * 3.0,
+        initialPosition,
+        level: currentLvl,
       });
 
       scene.add(mos.group);
@@ -251,12 +252,17 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         spawnMosquito(true);
         // Spawn accompanying minion mosquitoes
         for (let i = 0; i < 4; i++) {
-          spawnMosquito(false);
+          spawnMosquito(false, i);
         }
-      } else {
-        // Initial wave of 5 mosquitoes, replenish as killed
-        for (let i = 0; i < 5; i++) {
-          spawnMosquito(false);
+      } else if (stateRef.current.currentLevel === 1) {
+        // Initial wave of 8 mosquitoes dispersed across ALL 8 sectors of the bedroom!
+        for (let i = 0; i < BEDROOM_SPAWN_SECTORS.length; i++) {
+          spawnMosquito(false, i);
+        }
+      } else if (stateRef.current.currentLevel === 2) {
+        // Initial wave of 8 mosquitoes for Level 2 dispersed across ALL 8 sectors of the bedroom!
+        for (let i = 0; i < BEDROOM_SPAWN_SECTORS.length; i++) {
+          spawnMosquito(false, i);
         }
       }
     };
@@ -356,7 +362,53 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     window.addEventListener('mousemove', onPointerMove as unknown as EventListener);
     window.addEventListener('mouseup', onMouseUp);
 
-    // --- 8. Window Resize ---
+    // --- 8. Keyboard & Wheel Navigation (Desktop / Testing support) ---
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
+        sensorManager.moveForward(0.35);
+      } else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') {
+        sensorManager.moveForward(-0.35);
+      } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        sensorManager.moveStrafe(-0.35);
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        sensorManager.moveStrafe(0.35);
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      sensorManager.moveForward(-Math.sign(e.deltaY) * 0.3);
+    };
+
+    // Two-finger touch drag for mobile forward/backward movement
+    let touchStartY = 0;
+    let isTwoFingerTouch = false;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        isTwoFingerTouch = true;
+        touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      } else {
+        isTwoFingerTouch = false;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (isTwoFingerTouch && e.touches.length === 2) {
+        const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const dy = touchStartY - currentY;
+        if (Math.abs(dy) > 4) {
+          sensorManager.moveForward(dy * 0.018);
+          touchStartY = currentY;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('wheel', handleWheel, { passive: true });
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+
+    // --- 9. Window Resize ---
     const handleResize = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
@@ -367,25 +419,43 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
-    // --- 9. Animation Loop ---
+    // --- 10. Animation Loop ---
     let animationFrameId: number;
     let lastTime = performance.now();
+    let lastObservedLevel = stateRef.current.currentLevel;
+    let lastIsPlaying = stateRef.current.isPlaying;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+
+      // Detect level transition or new round start/restart
+      if (
+        stateRef.current.currentLevel !== lastObservedLevel ||
+        (stateRef.current.isPlaying && !lastIsPlaying)
+      ) {
+        lastObservedLevel = stateRef.current.currentLevel;
+        lastIsPlaying = stateRef.current.isPlaying;
+        initLevelSpawns();
+      } else {
+        lastIsPlaying = stateRef.current.isPlaying;
+      }
 
       const now = performance.now();
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
-      // Update sensors
-      const { orientation, audio } = sensorManager.update();
+      // Update sensors (Orientation + 6DOF Spatial Position + Audio)
+      const { orientation, position, audio } = sensorManager.update();
 
       // Camera rotation: Euler order YXZ (Yaw, Pitch, Roll)
       camera.rotation.order = 'YXZ';
       camera.rotation.y = orientation.yawRad;
       camera.rotation.x = orientation.pitchRad;
       camera.rotation.z = orientation.rollRad;
+
+      // Camera 6DOF spatial translation in 3D room
+      camera.position.set(position.x, position.y, position.z);
+      camera.updateMatrixWorld();
 
       // Toggle room visibility based on AR mode
       roomGroup.visible = !isARModeRef.current;
@@ -417,12 +487,12 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           }
         }
 
-        // Maintain mosquito population
+        // Maintain mosquito population across all room sectors
         spawnTimer += delta;
-        const targetActiveCount = stateRef.current.currentLevel === 3 ? 5 : 5;
+        const targetActiveCount = stateRef.current.currentLevel === 3 ? 5 : 8;
         const aliveCount = mosquitoes.filter((m) => !m.isDead).length;
 
-        if (aliveCount < targetActiveCount && spawnTimer > 0.8) {
+        if (aliveCount < targetActiveCount && spawnTimer > 0.6) {
           spawnTimer = 0;
           if (stateRef.current.currentLevel < 3) {
             const neededKills = stateRef.current.targetKills - currentKills;
@@ -446,7 +516,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           if (!mos.isDead) {
             // Calculate spatial audio position relative to camera view
             const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
-            const speedFactor = stateRef.current.currentLevel === 2 ? 1.5 : 1.0;
+            const speedFactor = stateRef.current.currentLevel === 2 ? 1.35 : 1.0;
             buzzManager.updateMosquitoBuzz(mos.id, relPos.x, relPos.y, relPos.z, mos.isBoss, speedFactor);
           } else {
             // Dead mosquito animation timeout removal
@@ -476,7 +546,10 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       window.removeEventListener('pointerdown', onPointerDown as unknown as EventListener);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onPointerMove as unknown as EventListener);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('resize', handleResize);
       clearMosquitoes();
       buzzManager.stopAll();

@@ -43,9 +43,9 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
           <p className="mt-2 text-xs text-slate-300">
             {level === 1 &&
-              'Aclimatación: Mosquitos medianos con zumbido claro. Encuéntralos con el giro de tu teléfono y elimínalos.'}
+              'Aclimatación: Mosquitos dispersos en la habitación volando calmadamente. Guíate principalmente por su zumbido 3D para encontrarlos.'}
             {level === 2 &&
-              'Los mosquitos son más pequeños y vuelan mucho más rápido. Agudiza tu oído y reflejos.'}
+              'Los mosquitos son un poco más pequeños y se mueven más rápido por toda la habitación. Sigue su zumbido agudo y elimínalos con rapidez.'}
             {level === 3 &&
               '¡El Mosquito Gigante ha aparecido! Para derrotarlo debes GRITAR lo más fuerte posible durante 10 segundos.'}
           </p>
@@ -56,7 +56,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
               <div>
                 <div className="text-[10px] text-slate-400 uppercase">Tiempo Límite</div>
                 <div className="font-mono text-sm font-bold text-amber-300">
-                  {level === 1 ? '30 seg' : level === 2 ? '25 seg' : '20 seg'}
+                  {level === 1 ? '60 seg' : level === 2 ? '50 seg' : '20 seg'}
                 </div>
               </div>
             </div>
