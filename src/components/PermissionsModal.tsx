@@ -88,7 +88,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
             <div className="my-5 w-full rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-left text-xs space-y-2.5 text-slate-300">
               <div className="flex items-start gap-2.5">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold">1</span>
-                <span><strong>Mueve tu celular 360°</strong> para ubicar los mosquitos. ¡Muévelo hacia adelante para avanzar hacia ellos o hacia atrás para retroceder!</span>
+                <span><strong>Apunta girando tu celular</strong> (giroscopio 1:1 natural) y <strong>camina con el mando táctil</strong> en pantalla para recorrer libremente la habitación hacia los mosquitos.</span>
               </div>
               <div className="flex items-start gap-2.5">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold">2</span>

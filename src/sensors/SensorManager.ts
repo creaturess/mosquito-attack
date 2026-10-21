@@ -52,6 +52,7 @@ export class SensorManager {
   private smoothedOrientation = { alpha: 0, beta: 0, gamma: 0 };
   private initialAlphaOffset: number | null = null;
   private calibratedBeta: number = 65; // Resting phone pitch angle
+  private calibratedGamma: number = 0;
   private hasReceivedGyroData = false;
 
   // Spatial Translation state (6DOF position tracking inside bedroom)
@@ -64,8 +65,8 @@ export class SensorManager {
   private lastMotionTimestamp: number = 0;
 
   // Sensitivity settings
-  public motionSensitivity: number = 2.2; // Forward/backward tracking multiplier
-  public tiltAssistEnabled: boolean = true;
+  public motionSensitivity: number = 1.5; // Calibrated for natural physical phone translation
+  public tiltAssistEnabled: boolean = false; // Disabled by default: tilting phone looks around, doesn't cause runaway movement!
 
   // Manual touch/mouse drag fallback for desktop / non-gyro devices
   private manualEuler = { yaw: 0, pitch: 0 };
@@ -81,14 +82,14 @@ export class SensorManager {
   private cameraStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
 
-  // Smoothing factors
-  private readonly ROT_LERP = 0.2;
-  private readonly POS_LERP = 0.15;
+  // Smoothing factors: balanced for rock-solid 1:1 feel without jitter
+  private readonly ROT_LERP = 0.16;
+  private readonly POS_LERP = 0.22;
 
   // Room spatial limits (inside bedroom walls)
-  private readonly LIMIT_X = 3.9;
-  private readonly LIMIT_Y_UP = 2.6;
-  private readonly LIMIT_Y_DOWN = 0.9;
+  private readonly LIMIT_X = 3.8;
+  private readonly LIMIT_Y_UP = 2.7;
+  private readonly LIMIT_Y_DOWN = 0.8;
   private readonly LIMIT_Z = 3.6;
 
   constructor() {
@@ -148,7 +149,8 @@ export class SensorManager {
 
   public calibrateCenter() {
     this.initialAlphaOffset = this.rawOrientation.alpha;
-    this.calibratedBeta = this.rawOrientation.beta || 65;
+    this.calibratedBeta = this.rawOrientation.beta !== undefined ? this.rawOrientation.beta : 65;
+    this.calibratedGamma = this.rawOrientation.gamma !== undefined ? this.rawOrientation.gamma : 0;
     this.manualEuler.yaw = 0;
     this.manualEuler.pitch = 0;
     this.resetPosition();
@@ -168,6 +170,7 @@ export class SensorManager {
       if (this.initialAlphaOffset === null) {
         this.initialAlphaOffset = event.alpha;
         this.calibratedBeta = event.beta;
+        this.calibratedGamma = event.gamma;
       }
 
       this.rawOrientation.alpha = event.alpha;
@@ -178,11 +181,12 @@ export class SensorManager {
 
   /**
    * DeviceMotion handler: calculates physical forward, backward, and lateral acceleration
+   * when the user intentionally pushes/retreats the phone in physical space.
    */
   private handleDeviceMotion(event: DeviceMotionEvent) {
     this.status.motionActive = true;
     const now = performance.now();
-    const dt = this.lastMotionTimestamp > 0 ? Math.min((now - this.lastMotionTimestamp) / 1000, 0.1) : 0.016;
+    const dt = this.lastMotionTimestamp > 0 ? Math.min((now - this.lastMotionTimestamp) / 1000, 0.08) : 0.016;
     this.lastMotionTimestamp = now;
 
     // Prefer linear acceleration (without gravity)
@@ -193,25 +197,31 @@ export class SensorManager {
     const rawY = acc.y ?? 0;
     const rawZ = acc.z ?? 0;
 
-    // Deadband threshold to eliminate sensor noise / tremor
-    const deadband = 0.22;
-    const fx = Math.abs(rawX) > deadband ? rawX : 0;
-    const fy = Math.abs(rawY) > deadband ? rawY : 0;
-    const fz = Math.abs(rawZ) > deadband ? rawZ : 0;
+    // Deadband threshold to eliminate sensor noise / tremor without blocking deliberate pushes
+    const deadband = 0.38;
+    const fx = Math.abs(rawX) > deadband ? (rawX - Math.sign(rawX) * deadband) : 0;
+    const fy = Math.abs(rawY) > deadband ? (rawY - Math.sign(rawY) * deadband) : 0;
+    const fz = Math.abs(rawZ) > deadband ? (rawZ - Math.sign(rawZ) * deadband) : 0;
 
-    // In mobile phone space:
-    // Pushing phone forward (away from user):
-    // negative Z or positive Y thrust depending on holding angle
-    const forwardThrust = (-fz * 0.75 + fy * 0.35) * this.motionSensitivity;
-    const strafeThrust = fx * this.motionSensitivity * 0.6;
+    if (fx === 0 && fy === 0 && fz === 0) {
+      // Fast decay when no intentional motion
+      this.linearVelocity.x *= 0.65;
+      this.linearVelocity.z *= 0.65;
+      return;
+    }
+
+    // In mobile phone coordinates:
+    // Pushing phone forward: negative Z or slight positive Y
+    const forwardThrust = (-fz * 0.7 + fy * 0.3) * this.motionSensitivity;
+    const strafeThrust = fx * this.motionSensitivity * 0.5;
 
     // Integrate forward/backward velocity with strong friction damping
-    this.linearVelocity.z += forwardThrust * dt * 2.8;
-    this.linearVelocity.x += strafeThrust * dt * 2.0;
+    this.linearVelocity.z += forwardThrust * dt * 1.5;
+    this.linearVelocity.x += strafeThrust * dt * 1.2;
 
-    // Apply damping so phone stops cleanly
-    this.linearVelocity.z *= 0.82;
-    this.linearVelocity.x *= 0.82;
+    // Strong damping prevents floating/skating
+    this.linearVelocity.z *= 0.72;
+    this.linearVelocity.x *= 0.72;
 
     // Add translation along current orientation
     const yaw = this.getYawRad();
@@ -220,18 +230,61 @@ export class SensorManager {
     const rightDirX = Math.cos(yaw);
     const rightDirZ = -Math.sin(yaw);
 
-    const deltaDist = this.linearVelocity.z * dt;
-    this.targetPosition.x += forwardDirX * deltaDist + rightDirX * (this.linearVelocity.x * dt);
-    this.targetPosition.z += forwardDirZ * deltaDist + rightDirZ * (this.linearVelocity.x * dt);
-    this.targetPosition.forwardDistance += deltaDist;
+    const deltaDistZ = this.linearVelocity.z * dt;
+    const deltaDistX = this.linearVelocity.x * dt;
+    this.targetPosition.x += forwardDirX * deltaDistZ + rightDirX * deltaDistX;
+    this.targetPosition.z += forwardDirZ * deltaDistZ + rightDirZ * deltaDistX;
+    this.targetPosition.forwardDistance += deltaDistZ;
 
     this.clampTargetPosition();
   }
 
-  private getYawRad(): number {
+  public getYawRad(): number {
     const degToRad = Math.PI / 180;
-    const calAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
+    let calAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
+    // Wrap to [-180, 180]
+    while (calAlpha > 180) calAlpha -= 360;
+    while (calAlpha < -180) calAlpha += 360;
     return -calAlpha * degToRad + this.manualEuler.yaw;
+  }
+
+  // Virtual Joystick input state
+  private joystickInput = { x: 0, y: 0 };
+
+  public setJoystickInput(x: number, y: number) {
+    this.joystickInput.x = Math.max(-1, Math.min(1, x));
+    this.joystickInput.y = Math.max(-1, Math.min(1, y));
+  }
+
+  public getJoystickInput(): { x: number; y: number } {
+    return this.joystickInput;
+  }
+
+  /**
+   * Continuous movement via virtual touch joystick in room space
+   * @param strafe: -1.0 (left) to 1.0 (right)
+   * @param forward: -1.0 (backward) to 1.0 (forward)
+   * @param deltaMeters: distance factor (speed * dt)
+   */
+  public moveJoystick(strafe: number, forward: number, deltaMeters: number) {
+    if (Math.abs(strafe) < 0.05 && Math.abs(forward) < 0.05) return;
+
+    const yaw = this.getYawRad();
+    // Forward direction in world space (relative to camera yaw)
+    const forwardDirX = -Math.sin(yaw);
+    const forwardDirZ = -Math.cos(yaw);
+    // Right strafe direction
+    const rightDirX = Math.cos(yaw);
+    const rightDirZ = -Math.sin(yaw);
+
+    const dx = (forwardDirX * forward + rightDirX * strafe) * deltaMeters;
+    const dz = (forwardDirZ * forward + rightDirZ * strafe) * deltaMeters;
+
+    this.targetPosition.x += dx;
+    this.targetPosition.z += dz;
+    this.targetPosition.forwardDistance += (forward * deltaMeters);
+
+    this.clampTargetPosition();
   }
 
   /**
@@ -385,26 +438,31 @@ export class SensorManager {
     let rollRad: number;
 
     if (this.hasReceivedGyroData) {
-      const calAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
-      yawRad = -calAlpha * degToRad + this.manualEuler.yaw;
-      pitchRad = (this.smoothedOrientation.beta - 70) * degToRad + this.manualEuler.pitch;
-      rollRad = -this.smoothedOrientation.gamma * degToRad * 0.5;
+      // 1:1 yaw mapping relative to calibrated orientation
+      let deltaAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
+      while (deltaAlpha > 180) deltaAlpha -= 360;
+      while (deltaAlpha < -180) deltaAlpha += 360;
+      yawRad = -deltaAlpha * degToRad + this.manualEuler.yaw;
 
-      // 2. Physical Tilt-to-Advance assist ("Fiel al movimiento del celular"):
-      // When user tilts/pushes phone forward past calibrated resting angle,
-      // apply continuous forward advancement; when pulled back, retreat!
+      // 1:1 pitch mapping relative to calibrated resting beta angle
+      const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
+      pitchRad = Math.max(-1.42, Math.min(1.42, deltaBeta * degToRad + this.manualEuler.pitch));
+
+      // Subtle roll relative to calibrated gamma
+      const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
+      rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
+
+      // Optional tilt assist only on deliberate extreme tilt
       if (this.tiltAssistEnabled) {
         const betaDiff = this.smoothedOrientation.beta - this.calibratedBeta;
-        if (Math.abs(betaDiff) > 5) {
-          // Tilting forward (higher beta): advance forward
-          // Tilting backward (lower beta): retreat
-          const tiltThrust = Math.sign(betaDiff) * Math.min(1.2, Math.pow(Math.abs(betaDiff) - 5, 1.2) * 0.05);
+        if (Math.abs(betaDiff) > 20) {
+          const tiltThrust = Math.sign(betaDiff) * Math.min(0.6, (Math.abs(betaDiff) - 20) * 0.02);
           const forwardDirX = -Math.sin(yawRad);
           const forwardDirZ = -Math.cos(yawRad);
 
-          this.targetPosition.x += forwardDirX * tiltThrust * 0.035;
-          this.targetPosition.z += forwardDirZ * tiltThrust * 0.035;
-          this.targetPosition.forwardDistance += tiltThrust * 0.035;
+          this.targetPosition.x += forwardDirX * tiltThrust * 0.02;
+          this.targetPosition.z += forwardDirZ * tiltThrust * 0.02;
+          this.targetPosition.forwardDistance += tiltThrust * 0.02;
           this.clampTargetPosition();
         }
       }

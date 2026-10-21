@@ -5,9 +5,8 @@
  * and 6DOF Spatial Motion controls & distance indicator.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Compass,
   Mic,
   MicOff,
   Camera,
@@ -18,8 +17,6 @@ import {
   Skull,
   Flame,
   Radio,
-  ChevronUp,
-  ChevronDown,
   Move3d,
   RotateCcw,
   Sliders,
@@ -27,6 +24,7 @@ import {
 import { SensorStatus, sensorManager } from '../sensors/SensorManager';
 import { GameState } from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
+import { VirtualJoystick } from './VirtualJoystick';
 
 interface UIOverlayProps {
   gameState: GameState;
@@ -49,10 +47,8 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
-  const [sensitivityMode, setSensitivityMode] = useState<'normal' | 'high' | 'ultra'>('high');
+  const [sensitivityMode, setSensitivityMode] = useState<'normal' | 'high' | 'ultra'>('normal');
   const [showSensitivityMenu, setShowSensitivityMenu] = useState(false);
-
-  const holdIntervalRef = useRef<number | null>(null);
 
   const toggleMute = () => {
     const nextMute = !isMuted;
@@ -62,34 +58,25 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
   const handleSetSensitivity = (mode: 'normal' | 'high' | 'ultra') => {
     setSensitivityMode(mode);
-    if (mode === 'normal') sensorManager.motionSensitivity = 1.6;
-    if (mode === 'high') sensorManager.motionSensitivity = 2.6;
-    if (mode === 'ultra') sensorManager.motionSensitivity = 3.8;
-  };
-
-  // Hold-to-walk handlers for on-screen touch pedals
-  const startWalking = (direction: 'forward' | 'backward') => {
-    const step = direction === 'forward' ? 0.22 : -0.22;
-    sensorManager.moveForward(step);
-    sensorManager.triggerHaptic('step');
-
-    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-    holdIntervalRef.current = window.setInterval(() => {
-      sensorManager.moveForward(step);
-      sensorManager.triggerHaptic('step');
-    }, 120);
-  };
-
-  const stopWalking = () => {
-    if (holdIntervalRef.current) {
-      clearInterval(holdIntervalRef.current);
-      holdIntervalRef.current = null;
-    }
+    if (mode === 'normal') sensorManager.motionSensitivity = 1.2;
+    if (mode === 'high') sensorManager.motionSensitivity = 2.0;
+    if (mode === 'ultra') sensorManager.motionSensitivity = 3.0;
   };
 
   // Screen click/tap slap visual feedback
   useEffect(() => {
     const handleTap = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.closest('[data-no-swat]') ||
+          target.closest('button') ||
+          target.closest('input') ||
+          target.closest('.pointer-events-auto'))
+      ) {
+        return;
+      }
+
       let x = 0;
       let y = 0;
       if ('touches' in e && e.touches.length > 0) {
@@ -309,52 +296,41 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* --- BOTTOM CONTROLS: SPATIAL PEDALS & TIPS --- */}
-      <footer className="flex flex-col items-center gap-2 pb-1">
-        {/* On-screen touch motion pedals (Avanzar / Retroceder) */}
-        <div className="flex items-center justify-between w-full max-w-sm px-2 pointer-events-auto">
-          {/* Movement Pedals */}
-          <div className="flex items-center gap-1.5 rounded-2xl border border-white/10 bg-black/60 p-1 backdrop-blur-md shadow-lg">
-            <button
-              onPointerDown={() => startWalking('forward')}
-              onPointerUp={stopWalking}
-              onPointerLeave={stopWalking}
-              className="flex items-center gap-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:bg-rose-600 px-3 py-2 text-xs font-bold text-white transition active:scale-95"
-              title="Avanzar en el espacio (también puedes mover el teléfono hacia adelante o usar tecla W)"
-            >
-              <ChevronUp className="h-4 w-4 text-emerald-400" />
-              <span>Avanzar</span>
-            </button>
-            <button
-              onPointerDown={() => startWalking('backward')}
-              onPointerUp={stopWalking}
-              onPointerLeave={stopWalking}
-              className="flex items-center gap-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:bg-rose-600 px-3 py-2 text-xs font-bold text-white transition active:scale-95"
-              title="Retroceder en el espacio (también puedes alejar el teléfono o usar tecla S)"
-            >
-              <ChevronDown className="h-4 w-4 text-cyan-400" />
-              <span>Retroceder</span>
-            </button>
+      {/* --- BOTTOM CONTROLS: VIRTUAL JOYSTICK & RECENTER --- */}
+      <footer className="flex flex-col gap-2 pb-1 pointer-events-none">
+        {/* Main bottom row */}
+        <div className="flex items-end justify-between w-full px-1">
+          {/* Virtual Joystick for 360-degree touch movement (Bottom Left) */}
+          <div className="pointer-events-auto pl-1 pb-1">
+            <VirtualJoystick
+              size={120}
+              onMove={(vec) => {
+                sensorManager.setJoystickInput(vec.x, vec.y);
+              }}
+            />
           </div>
 
-          {/* Quick Recenter Button */}
-          <button
-            onClick={onCalibrateGyro}
-            className="flex items-center gap-1 rounded-2xl border border-white/10 bg-black/60 px-3 py-2.5 text-xs text-slate-300 hover:text-white backdrop-blur-md transition active:scale-95"
-            title="Re-centrar posición al origen"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            <span className="text-[11px]">Centrar</span>
-          </button>
+          {/* Right Bottom Actions: Recenter Button & Displacement Badge */}
+          <div className="flex flex-col items-end gap-2 pr-1 pb-2 pointer-events-auto">
+            {/* Quick Recenter Orientation Button */}
+            <button
+              onClick={onCalibrateGyro}
+              className="flex items-center gap-1.5 rounded-2xl border border-cyan-500/40 bg-slate-900/85 px-3.5 py-2.5 text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800 backdrop-blur-md shadow-xl transition active:scale-95"
+              title="Re-centrar orientación y posición al origen"
+            >
+              <RotateCcw className="h-4 w-4 text-cyan-400" />
+              <span>Centrar Giroscopio</span>
+            </button>
+          </div>
         </div>
 
         {/* Dynamic Tip */}
-        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/65 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg">
+        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-none mx-auto max-w-lg">
           <span className="text-cyan-400 font-semibold flex items-center gap-1">
-            🎧 Sigue el zumbido 3D para ubicar a los mosquitos en la habitación
+            🕹️ Usa el mando táctil para moverte • Gira el celular para apuntar
           </span>
           <span className="text-slate-500 hidden sm:inline">•</span>
-          <span className="text-slate-300 hidden sm:inline">Avanza con tu celular hacia ellos y toca para aplastar</span>
+          <span className="text-slate-300 hidden sm:inline">🎧 Sigue el zumbido 3D y aplasta tocando la pantalla</span>
         </div>
       </footer>
     </div>

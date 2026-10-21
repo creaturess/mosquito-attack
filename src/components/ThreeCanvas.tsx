@@ -329,8 +329,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       }
     };
 
-    // Touch & pointer events
+    // Touch & pointer events for swatting mosquitoes
     const onPointerDown = (e: PointerEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      // Do not swat if tapping on virtual joystick, controls, or modals
+      if (targetEl && (targetEl.closest('[data-no-swat]') || targetEl.closest('button') || targetEl.closest('input') || targetEl.closest('.pointer-events-auto'))) {
+        return;
+      }
       handleSwat(e.clientX, e.clientY);
     };
 
@@ -348,7 +353,11 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      // Only drag if left click held and dragging
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl && (targetEl.closest('[data-no-swat]') || targetEl.closest('button') || targetEl.closest('input'))) {
+        return;
+      }
+      // Only drag if left click held and dragging on background/canvas
       isDragging = true;
       prevPointer = { x: e.clientX, y: e.clientY };
     };
@@ -443,6 +452,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const now = performance.now();
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
+
+      // Process virtual touch joystick movement (360-degree analog walk & strafe)
+      const joy = sensorManager.getJoystickInput();
+      if (Math.abs(joy.x) > 0.02 || Math.abs(joy.y) > 0.02) {
+        const walkSpeed = 2.8; // meters per second
+        sensorManager.moveJoystick(joy.x, joy.y, walkSpeed * delta);
+      }
 
       // Update sensors (Orientation + 6DOF Spatial Position + Audio)
       const { orientation, position, audio } = sensorManager.update();
