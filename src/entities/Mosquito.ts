@@ -16,6 +16,9 @@ export interface MosquitoOptions {
   spawnPitch?: number;
   initialPosition?: THREE.Vector3;
   level?: 1 | 2 | 3;
+  assignedAngle?: number;
+  assignedRadius?: number;
+  preferredAltitudeOffset?: number;
 }
 
 export class Mosquito {
@@ -25,6 +28,11 @@ export class Mosquito {
   public isDead: boolean = false;
   public deathTime: number = 0;
   public level: 1 | 2 | 3;
+
+  // Individual spatial territory (prevents grouping / clumping)
+  public assignedAngle: number;
+  public assignedRadius: number;
+  public preferredAltitudeOffset: number;
 
   // Wings for flapping animation
   private leftWing: THREE.Mesh;
@@ -59,25 +67,31 @@ export class Mosquito {
 
     if (options.initialPosition) {
       this.group.position.copy(options.initialPosition);
+      this.assignedAngle = options.assignedAngle !== undefined
+        ? options.assignedAngle
+        : Math.atan2(options.initialPosition.z, options.initialPosition.x);
+      this.assignedRadius = options.assignedRadius !== undefined
+        ? options.assignedRadius
+        : Math.hypot(options.initialPosition.x, options.initialPosition.z);
     } else {
-      // 360-degree spawn dispersal in real-world space around player
-      const spawnDist =
-        options.spawnDistance ||
-        (this.isBoss
-          ? 3.2
-          : this.level === 1
-          ? 2.0 + Math.random() * 2.2
-          : 2.2 + Math.random() * 2.0);
+      this.assignedAngle = options.assignedAngle !== undefined ? options.assignedAngle : Math.random() * Math.PI * 2;
+      this.assignedRadius = options.assignedRadius !== undefined
+        ? options.assignedRadius
+        : this.isBoss
+        ? 2.6
+        : 1.3 + Math.random() * 2.2;
 
-      const flightAngle = options.spawnAngle !== undefined ? options.spawnAngle : Math.random() * Math.PI * 2;
-      const flightPitch = options.spawnPitch !== undefined ? options.spawnPitch : (Math.random() - 0.4) * 0.9;
-
-      const spawnX = Math.cos(flightAngle) * Math.cos(flightPitch) * spawnDist;
-      const spawnY = Math.max(0.8, Math.min(2.8, 1.5 + Math.sin(flightPitch) * spawnDist));
-      const spawnZ = Math.sin(flightAngle) * Math.cos(flightPitch) * spawnDist;
+      const flightPitch = options.spawnPitch !== undefined ? options.spawnPitch : (Math.random() - 0.4) * 0.7;
+      const spawnX = Math.cos(this.assignedAngle) * Math.cos(flightPitch) * this.assignedRadius;
+      const spawnY = Math.max(0.9, Math.min(2.4, 1.5 + Math.sin(flightPitch) * this.assignedRadius));
+      const spawnZ = Math.sin(this.assignedAngle) * Math.cos(flightPitch) * this.assignedRadius;
 
       this.group.position.set(spawnX, spawnY, spawnZ);
     }
+
+    this.preferredAltitudeOffset = options.preferredAltitudeOffset !== undefined
+      ? options.preferredAltitudeOffset
+      : (Math.random() - 0.5) * 0.6;
 
     // Initialize first flight destination in real space
     this.pickNextWaypoint();
@@ -170,8 +184,8 @@ export class Mosquito {
       this.group.add(lLeg, rLeg);
     }
 
-    // 8. Hit detection sphere
-    const hitRadius = this.isBoss ? 2.2 : (this.level === 1 ? 0.95 : 0.82);
+    // 8. Hit detection sphere - Generous radius so varying distances are easily selectable
+    const hitRadius = this.isBoss ? 2.6 : 1.35;
     const hitGeo = new THREE.SphereGeometry(hitRadius, 6, 6);
     const hitMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: true });
     this.hitSphere = new THREE.Mesh(hitGeo, hitMat);
@@ -191,33 +205,46 @@ export class Mosquito {
   }
 
   /**
-   * Choose a new 3D flight destination in real-world space around the player
+   * Choose an individual flight waypoint in real-world space around the player
+   * Kept in its own individual territory to prevent grouping.
    */
   private pickNextWaypoint(centerPos?: THREE.Vector3) {
     const cx = centerPos ? centerPos.x : 0;
     const cy = centerPos ? centerPos.y : 1.6;
     const cz = centerPos ? centerPos.z : 0;
 
-    // Pick 360-degree angle around player
-    const angle = Math.random() * Math.PI * 2;
-    const dist = this.isBoss ? 1.8 + Math.random() * 1.5 : (1.2 + Math.random() * 2.8);
-    const targetX = cx + Math.cos(angle) * dist;
-    const targetZ = cz + Math.sin(angle) * dist;
-    const targetY = Math.max(0.6, Math.min(3.2, cy + (Math.random() - 0.5) * 1.6));
+    if (this.isBoss) {
+      const angle = (Math.random() - 0.5) * 0.8;
+      const dist = 1.6 + Math.random() * 0.8;
+      this.currentWaypoint.set(
+        cx + Math.sin(angle) * dist,
+        Math.max(1.3, Math.min(2.1, cy + (Math.random() - 0.5) * 0.5)),
+        cz - Math.cos(angle) * dist
+      );
+    } else {
+      // Individual roaming: keep within its own unique angular quadrant and distance band
+      const angle = this.assignedAngle + (Math.random() - 0.5) * 0.7;
+      const dist = Math.max(1.2, this.assignedRadius + (Math.random() - 0.5) * 0.45);
+      const targetX = cx + Math.cos(angle) * dist;
+      const targetZ = cz + Math.sin(angle) * dist;
+      const targetY = Math.max(0.8, Math.min(2.5, cy + this.preferredAltitudeOffset + (Math.random() - 0.5) * 0.35));
 
-    this.currentWaypoint.set(targetX, targetY, targetZ);
+      this.currentWaypoint.set(targetX, targetY, targetZ);
+    }
+
     this.waypointTimer = 0;
-    this.maxWaypointInterval = this.level === 1 ? 5.5 + Math.random() * 3.0 : 2.8 + Math.random() * 2.0;
+    this.maxWaypointInterval = this.level === 1 ? 5.5 + Math.random() * 3.0 : 3.0 + Math.random() * 2.0;
   }
 
   /**
-   * Flight and wing animation update
+   * Flight and wing animation update with anti-clustering repulsion
    */
   public update(
     delta: number,
     elapsedTime: number,
     playerPos: THREE.Vector3,
-    reactiveAudioLevel: number = 0
+    reactiveAudioLevel: number = 0,
+    otherPositions?: THREE.Vector3[]
   ) {
     if (this.isDead) {
       this.group.position.y -= delta * 4;
@@ -245,53 +272,71 @@ export class Mosquito {
     const distToWaypoint = this.group.position.distanceTo(this.currentWaypoint);
 
     // Pick new waypoint when reached or after flight timer expires
-    if (distToWaypoint < 1.0 || this.waypointTimer >= this.maxWaypointInterval) {
+    if (distToWaypoint < 0.9 || this.waypointTimer >= this.maxWaypointInterval) {
       this.pickNextWaypoint(playerPos);
     }
 
     // Desired direction towards waypoint
     const desiredDir = this.currentWaypoint.clone().sub(this.group.position).normalize();
 
-    // Natural sinusoidal wave oscillation so flight is organic and curvy
-    const t = (elapsedTime + this.timeOffset) * (this.level === 1 ? 1.8 : 2.8);
-    const wavyOffsetX = Math.sin(t * 1.5) * (this.level === 1 ? 0.35 : 0.45);
-    const wavyOffsetY = Math.cos(t * 1.2) * (this.level === 1 ? 0.25 : 0.35);
-    const wavyOffsetZ = Math.sin(t * 1.9) * (this.level === 1 ? 0.35 : 0.45);
+    // Sinusoidal gentle hovering wave oscillation
+    const t = (elapsedTime + this.timeOffset) * (this.level === 1 ? 1.4 : 2.2);
+    const wavyOffsetX = Math.sin(t * 1.5) * (this.level === 1 ? 0.25 : 0.35);
+    const wavyOffsetY = Math.cos(t * 1.2) * (this.level === 1 ? 0.2 : 0.3);
+    const wavyOffsetZ = Math.sin(t * 1.9) * (this.level === 1 ? 0.25 : 0.35);
 
     desiredDir.x += wavyOffsetX;
     desiredDir.y += wavyOffsetY;
     desiredDir.z += wavyOffsetZ;
+
+    // Anti-clustering repulsion from other mosquitoes: NEVER clump into groups!
+    if (otherPositions && otherPositions.length > 0) {
+      for (let j = 0; j < otherPositions.length; j++) {
+        const otherPos = otherPositions[j];
+        const sepDist = this.group.position.distanceTo(otherPos);
+        if (sepDist > 0.02 && sepDist < 1.4) {
+          const push = this.group.position.clone().sub(otherPos).normalize();
+          const force = (1.4 - sepDist) * 1.6;
+          desiredDir.addScaledVector(push, force);
+        }
+      }
+    }
     desiredDir.normalize();
 
-    // Target velocity: slow, gentle cruising in Level 1, slightly faster in Level 2
-    const cruiseMultiplier = this.level === 1 ? 1.7 : 2.1;
+    // Target velocity: slow, gentle cruising
+    const cruiseMultiplier = this.level === 1 ? 1.6 : 2.0;
     const targetVelocity = desiredDir.multiplyScalar(this.speed * cruiseMultiplier);
 
     // Smooth steering turn
-    const steeringLerp = this.level === 1 ? 1.5 : 2.6;
+    const steeringLerp = this.level === 1 ? 1.5 : 2.4;
     this.flightVelocity.lerp(targetVelocity, delta * steeringLerp);
 
     // Advance position through real space
     this.group.position.addScaledVector(this.flightVelocity, delta);
 
-    // Keep mosquitoes within reasonable distance of player in real space
-    const horizontalDistToPlayer = Math.hypot(this.group.position.x - playerPos.x, this.group.position.z - playerPos.z);
-    if (horizontalDistToPlayer > 5.5) {
-      const returnDir = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z).sub(this.group.position).normalize();
-      this.flightVelocity.lerp(returnDir.multiplyScalar(this.speed * 2.0), delta * 3.0);
+    // Maintain preferred radial distance band around player
+    if (!this.isBoss) {
+      const currentDist = Math.hypot(this.group.position.x - playerPos.x, this.group.position.z - playerPos.z);
+      if (Math.abs(currentDist - this.assignedRadius) > 0.9) {
+        const curAngle = Math.atan2(this.group.position.z - playerPos.z, this.group.position.x - playerPos.x);
+        const idealX = playerPos.x + Math.cos(curAngle) * this.assignedRadius;
+        const idealZ = playerPos.z + Math.sin(curAngle) * this.assignedRadius;
+        const restoreDir = new THREE.Vector3(idealX, this.group.position.y, idealZ).sub(this.group.position).normalize();
+        this.flightVelocity.lerp(restoreDir.multiplyScalar(this.speed * 1.6), delta * 2.2);
+      }
     }
 
     // Floor and ceiling bounds relative to standing height
-    this.group.position.y = Math.max(0.4, Math.min(3.6, this.group.position.y));
+    this.group.position.y = Math.max(0.6, Math.min(3.2, this.group.position.y));
 
     // Look towards velocity vector & bank body into turns
     if (this.flightVelocity.lengthSq() > 0.001) {
       const lookTarget = this.group.position.clone().add(this.flightVelocity);
       this.group.lookAt(lookTarget);
 
-      // Bank roll in curves (banking like an airplane/insect)
+      // Bank roll in curves
       const horizontalTurn = this.flightVelocity.x;
-      this.group.rotation.z = -horizontalTurn * 0.2;
+      this.group.rotation.z = -horizontalTurn * 0.18;
     }
   }
 

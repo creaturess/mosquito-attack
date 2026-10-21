@@ -132,85 +132,102 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let accumulatedScreamTime = 0;
     let bossInstance: Mosquito | null = null;
 
-    // 8 distinct 360-degree spatial sectors around the player in real physical space (calm eye-level ring 1.5m - 1.9m)
-    const REAL_SPACE_SPAWN_SECTORS = [
-      // 1. Directly Ahead (Front Center, eye-level)
-      new THREE.Vector3(0.0, 1.55, -1.65),
-      // 2. Front-Right (Comfortable viewing angle)
-      new THREE.Vector3(1.25, 1.62, -1.15),
-      // 3. Right Flank
-      new THREE.Vector3(1.65, 1.52, 0.1),
-      // 4. Behind-Right
-      new THREE.Vector3(1.25, 1.58, 1.25),
-      // 5. Directly Behind
-      new THREE.Vector3(0.0, 1.55, 1.65),
-      // 6. Behind-Left
-      new THREE.Vector3(-1.25, 1.58, 1.25),
-      // 7. Left Flank
-      new THREE.Vector3(-1.65, 1.52, 0.1),
-      // 8. Front-Left (Comfortable viewing angle)
-      new THREE.Vector3(-1.25, 1.48, -1.15),
-    ];
-
-    // Helper to spawn a mosquito in real physical space
-    const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number) => {
+    // Dispersed individual spawn with varied distances (Near, Mid, Far)
+    const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number, totalWave: number = 8) => {
       const id = `mosquito_${nextMosquitoId++}`;
       const currentLvl = stateRef.current.currentLevel;
       let scale = 1.0;
       let speed = 0.14;
-      let initialPosition: THREE.Vector3 | undefined = undefined;
+
+      if (isBoss) {
+        scale = 3.8;
+        speed = 0.16;
+        const initialPosition = new THREE.Vector3(0.0, 1.6, -1.85);
+        const mos = new Mosquito({
+          id,
+          isBoss: true,
+          scale,
+          speed,
+          initialPosition,
+          level: currentLvl,
+        });
+        scene.add(mos.group);
+        mosquitoes.push(mos);
+        bossInstance = mos;
+        return mos;
+      }
+
+      // Varied distance tiers: Near (1.3m - 1.7m), Mid (1.9m - 2.7m), Far (2.8m - 3.7m)
+      const DISTANCE_TIERS = [1.45, 2.3, 3.2, 1.6, 2.7, 3.5, 1.35, 2.2];
+      let assignedAngle: number;
+      let assignedRadius: number;
+
+      if (sectorIndex !== undefined) {
+        // Individual partition across 360-degrees with jitter
+        const angleStep = (Math.PI * 2) / totalWave;
+        assignedAngle = sectorIndex * angleStep + (Math.random() - 0.5) * 0.35;
+        const baseRadius = DISTANCE_TIERS[sectorIndex % DISTANCE_TIERS.length];
+        assignedRadius = baseRadius + (Math.random() - 0.5) * 0.3;
+      } else {
+        // Dynamic replacement spawn: find the largest angular gap from living mosquitoes
+        let bestAngle = Math.random() * Math.PI * 2;
+        let maxMinGap = -1;
+        const aliveMos = mosquitoes.filter((m) => !m.isDead);
+
+        for (let candidate = 0; candidate < 16; candidate++) {
+          const testAngle = (candidate * (Math.PI * 2)) / 16 + (Math.random() - 0.5) * 0.2;
+          let minDiff = Math.PI;
+          for (const m of aliveMos) {
+            let diff = Math.abs(testAngle - m.assignedAngle);
+            if (diff > Math.PI) diff = Math.PI * 2 - diff;
+            if (diff < minDiff) minDiff = diff;
+          }
+          if (minDiff > maxMinGap) {
+            maxMinGap = minDiff;
+            bestAngle = testAngle;
+          }
+        }
+
+        assignedAngle = bestAngle;
+        const tierChoice = Math.floor(Math.random() * 3);
+        assignedRadius =
+          tierChoice === 0
+            ? 1.35 + Math.random() * 0.35 // Near
+            : tierChoice === 1
+            ? 2.0 + Math.random() * 0.6   // Mid
+            : 2.8 + Math.random() * 0.8;  // Far
+      }
+
+      // Altitude / pitch variation
+      const pitch = (Math.random() - 0.4) * 0.5;
+      const initialPosition = new THREE.Vector3(
+        Math.cos(assignedAngle) * Math.cos(pitch) * assignedRadius,
+        Math.max(0.9, Math.min(2.4, 1.6 + Math.sin(pitch) * assignedRadius)),
+        Math.sin(assignedAngle) * Math.cos(pitch) * assignedRadius
+      );
 
       if (currentLvl === 1) {
-        // High visibility scale and calm, slow hovering
         scale = 1.35;
         speed = 0.14;
-        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
-        const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
-        initialPosition = new THREE.Vector3(
-          basePos.x + (Math.random() - 0.5) * 0.4,
-          Math.max(1.1, Math.min(2.1, basePos.y + (Math.random() - 0.5) * 0.3)),
-          basePos.z + (Math.random() - 0.5) * 0.4
-        );
-      } else if (currentLvl === 2) {
-        // Clear scale, moderate calm speed (much slower than previous 0.92)
+      } else {
         scale = 1.05;
         speed = 0.22;
-        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
-        const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
-        initialPosition = new THREE.Vector3(
-          basePos.x + (Math.random() - 0.5) * 0.5,
-          Math.max(1.1, Math.min(2.1, basePos.y + (Math.random() - 0.5) * 0.35)),
-          basePos.z + (Math.random() - 0.5) * 0.5
-        );
-      } else if (currentLvl === 3) {
-        if (isBoss) {
-          scale = 3.8; // Giant Final Boss, majestic and ominous
-          speed = 0.16;
-          // Spawn clearly in front of the player
-          initialPosition = new THREE.Vector3(0.0, 1.6, -1.85);
-        } else {
-          scale = 1.05;
-          speed = 0.22;
-          const basePos = REAL_SPACE_SPAWN_SECTORS[Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length)];
-          initialPosition = new THREE.Vector3(basePos.x, basePos.y, basePos.z);
-        }
       }
 
       const mos = new Mosquito({
         id,
-        isBoss,
+        isBoss: false,
         scale,
         speed,
         initialPosition,
         level: currentLvl,
+        assignedAngle,
+        assignedRadius,
+        preferredAltitudeOffset: (Math.random() - 0.5) * 0.6,
       });
 
       scene.add(mos.group);
       mosquitoes.push(mos);
-
-      if (isBoss) {
-        bossInstance = mos;
-      }
       return mos;
     };
 
@@ -233,19 +250,15 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       if (stateRef.current.currentLevel === 3) {
         // Spawn Giant Boss
         spawnMosquito(true);
-        // Spawn accompanying minion mosquitoes
+        // Spawn accompanying minion mosquitoes dispersed individually
         for (let i = 0; i < 4; i++) {
-          spawnMosquito(false, i);
+          spawnMosquito(false, i, 4);
         }
-      } else if (stateRef.current.currentLevel === 1) {
-        // Initial wave of 8 mosquitoes dispersed across ALL 8 sectors of real physical space!
-        for (let i = 0; i < REAL_SPACE_SPAWN_SECTORS.length; i++) {
-          spawnMosquito(false, i);
-        }
-      } else if (stateRef.current.currentLevel === 2) {
-        // Initial wave of 8 mosquitoes for Level 2 dispersed across ALL 8 sectors of real physical space!
-        for (let i = 0; i < REAL_SPACE_SPAWN_SECTORS.length; i++) {
-          spawnMosquito(false, i);
+      } else {
+        // Initial wave of 8 mosquitoes dispersed individually across 360° with varied distance tiers
+        const count = 8;
+        for (let i = 0; i < count; i++) {
+          spawnMosquito(false, i, count);
         }
       }
     };
@@ -274,36 +287,70 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
       const intersects = raycaster.intersectObjects(hitObjects, true);
 
+      let hitTarget: Mosquito | null = null;
+      let hitPoint: THREE.Vector3 = new THREE.Vector3();
+
       if (intersects.length > 0) {
         const hitSphere = intersects[0].object as THREE.Mesh;
         const mosquitoId = hitSphere.userData?.mosquitoId;
-        const isBoss = hitSphere.userData?.isBoss;
+        hitTarget = mosquitoes.find((m) => m.id === mosquitoId && !m.isDead) || null;
+        if (hitTarget) {
+          hitPoint.copy(intersects[0].point);
+        }
+      }
 
-        const target = mosquitoes.find((m) => m.id === mosquitoId);
-        if (target && !target.isDead) {
-          if (isBoss) {
-            // Boss takes damage from taps but primarily needs scream!
-            // Give tactile feedback and hurt noise
-            buzzManager.playBossHurtSfx();
-            sensorManager.triggerHaptic('bossHit');
-            particles.emitSplat(intersects[0].point, true);
-          } else {
-            // Kill normal mosquito
-            target.kill();
-            buzzManager.stopMosquitoBuzz(target.id);
-            buzzManager.playSwatSfx();
-            sensorManager.triggerHaptic('swat');
-            particles.emitSplat(intersects[0].point, false);
+      // Screen-space proximity fallback: guarantees that mosquitoes at farther distances (2.5m - 3.8m)
+      // are effortlessly selectable with touch or click (80px radius tolerance)
+      if (!hitTarget) {
+        let bestDistancePx = 80;
+        const screenPos = new THREE.Vector3();
 
-            currentKills++;
-            onKillRef.current(currentKills, false);
+        for (const mos of mosquitoes) {
+          if (mos.isDead) continue;
+          screenPos.setFromMatrixPosition(mos.group.matrixWorld);
 
-            // Check level victory for Level 1 and 2
-            if (stateRef.current.currentLevel < 3 && currentKills >= stateRef.current.targetKills) {
-              buzzManager.playVictorySfx();
-              sensorManager.triggerHaptic('victory');
-              onLevelCompleteRef.current();
-            }
+          // Check if in front of camera
+          const viewPos = screenPos.clone().applyMatrix4(camera.matrixWorldInverse);
+          if (viewPos.z >= -0.15) continue; // Behind or right on the camera plane
+
+          screenPos.project(camera);
+          // Check if within viewport NDC bounds
+          if (screenPos.z > 1.0 || screenPos.z < -1.0) continue;
+
+          const mosScreenX = ((screenPos.x + 1) * window.innerWidth) / 2;
+          const mosScreenY = ((-screenPos.y + 1) * window.innerHeight) / 2;
+
+          const distPx = Math.hypot(clientX - mosScreenX, clientY - mosScreenY);
+          if (distPx < bestDistancePx) {
+            bestDistancePx = distPx;
+            hitTarget = mos;
+            hitPoint.setFromMatrixPosition(mos.group.matrixWorld);
+          }
+        }
+      }
+
+      if (hitTarget) {
+        if (hitTarget.isBoss) {
+          // Boss takes damage from taps but primarily needs scream
+          buzzManager.playBossHurtSfx();
+          sensorManager.triggerHaptic('bossHit');
+          particles.emitSplat(hitPoint, true);
+        } else {
+          // Kill normal mosquito
+          hitTarget.kill();
+          buzzManager.stopMosquitoBuzz(hitTarget.id);
+          buzzManager.playSwatSfx();
+          sensorManager.triggerHaptic('swat');
+          particles.emitSplat(hitPoint, false);
+
+          currentKills++;
+          onKillRef.current(currentKills, false);
+
+          // Check level victory for Level 1 and 2
+          if (stateRef.current.currentLevel < 3 && currentKills >= stateRef.current.targetKills) {
+            buzzManager.playVictorySfx();
+            sensorManager.triggerHaptic('victory');
+            onLevelCompleteRef.current();
           }
         }
       } else {
@@ -507,9 +554,15 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         let minDistance = Infinity;
         let closestRelPos: THREE.Vector3 | null = null;
 
+        // Collect active positions to enforce anti-clustering separation (never fly in groups)
+        const alivePositions: THREE.Vector3[] = [];
+        for (let k = 0; k < mosquitoes.length; k++) {
+          if (!mosquitoes[k].isDead) alivePositions.push(mosquitoes[k].group.position);
+        }
+
         for (let i = mosquitoes.length - 1; i >= 0; i--) {
           const mos = mosquitoes[i];
-          mos.update(delta, now * 0.001, cameraPos, audio.volume);
+          mos.update(delta, now * 0.001, cameraPos, audio.volume, alivePositions);
 
           if (!mos.isDead) {
             // Calculate spatial audio position relative to camera view

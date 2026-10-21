@@ -17,8 +17,6 @@ import {
   Skull,
   Flame,
   Radio,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { SensorStatus, sensorManager } from '../sensors/SensorManager';
 import { GameState, NearestMosquitoInfo } from './ThreeCanvas';
@@ -194,17 +192,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* --- SCREEN EDGE ARROWS (Subtle Directional Guidance) --- */}
-      {gameState.isPlaying && nearestMosquito && nearestMosquito.direction === 'left' && (
-        <div className="pointer-events-none fixed left-3 top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border border-amber-400/50 bg-black/75 p-3 text-amber-400 shadow-2xl backdrop-blur-md animate-pulse">
-          <ChevronLeft className="h-8 w-8 text-amber-400 stroke-[2.5]" />
-        </div>
-      )}
-      {gameState.isPlaying && nearestMosquito && nearestMosquito.direction === 'right' && (
-        <div className="pointer-events-none fixed right-3 top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border border-amber-400/50 bg-black/75 p-3 text-amber-400 shadow-2xl backdrop-blur-md animate-pulse">
-          <ChevronRight className="h-8 w-8 text-amber-400 stroke-[2.5]" />
-        </div>
-      )}
+
 
       {/* --- BOTTOM CONTROLS: VIRTUAL JOYSTICK ONLY --- */}
       <footer className="pb-3 pl-2 pointer-events-none">
