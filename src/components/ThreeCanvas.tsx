@@ -24,6 +24,11 @@ export interface GameState {
   isARMode: boolean;
 }
 
+export interface NearestMosquitoInfo {
+  direction: 'center' | 'left' | 'right' | 'behind';
+  distance: number;
+}
+
 interface ThreeCanvasProps {
   gameState: GameState;
   onKill: (newKills: number, isBoss: boolean) => void;
@@ -32,6 +37,7 @@ interface ThreeCanvasProps {
   onScreamProgress: (accumulatedSec: number) => void;
   isARMode: boolean;
   videoElement: HTMLVideoElement | null;
+  onNearestMosquitoUpdate?: (info: NearestMosquitoInfo | null) => void;
 }
 
 export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
@@ -42,6 +48,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   onScreamProgress,
   isARMode,
   videoElement,
+  onNearestMosquitoUpdate,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,6 +74,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
   const isARModeRef = useRef(isARMode);
   isARModeRef.current = isARMode;
+
+  const onNearestMosquitoUpdateRef = useRef(onNearestMosquitoUpdate);
+  onNearestMosquitoUpdateRef.current = onNearestMosquitoUpdate;
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -122,65 +132,65 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let accumulatedScreamTime = 0;
     let bossInstance: Mosquito | null = null;
 
-    // 8 distinct 360-degree spatial sectors around the player in real physical space:
+    // 8 distinct 360-degree spatial sectors around the player in real physical space (calm eye-level ring 1.5m - 1.9m)
     const REAL_SPACE_SPAWN_SECTORS = [
       // 1. Directly Ahead (Front Center, eye-level)
-      new THREE.Vector3(0.0, 1.6, -2.2),
-      // 2. Front-Right (Elevated)
-      new THREE.Vector3(1.8, 2.3, -1.8),
-      // 3. Right Flank (Around ear level)
-      new THREE.Vector3(2.4, 1.7, 0.2),
-      // 4. Behind-Right (Deep right rear)
-      new THREE.Vector3(1.9, 1.8, 2.0),
-      // 5. Directly Behind (Rear center)
-      new THREE.Vector3(0.0, 1.9, 2.4),
-      // 6. Behind-Left (Deep left rear)
-      new THREE.Vector3(-1.9, 1.8, 2.0),
-      // 7. Left Flank (Around ear level)
-      new THREE.Vector3(-2.4, 1.7, 0.2),
-      // 8. Front-Left (Lower elevation)
-      new THREE.Vector3(-1.8, 1.1, -1.8),
+      new THREE.Vector3(0.0, 1.55, -1.65),
+      // 2. Front-Right (Comfortable viewing angle)
+      new THREE.Vector3(1.25, 1.62, -1.15),
+      // 3. Right Flank
+      new THREE.Vector3(1.65, 1.52, 0.1),
+      // 4. Behind-Right
+      new THREE.Vector3(1.25, 1.58, 1.25),
+      // 5. Directly Behind
+      new THREE.Vector3(0.0, 1.55, 1.65),
+      // 6. Behind-Left
+      new THREE.Vector3(-1.25, 1.58, 1.25),
+      // 7. Left Flank
+      new THREE.Vector3(-1.65, 1.52, 0.1),
+      // 8. Front-Left (Comfortable viewing angle)
+      new THREE.Vector3(-1.25, 1.48, -1.15),
     ];
 
     // Helper to spawn a mosquito in real physical space
     const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number) => {
       const id = `mosquito_${nextMosquitoId++}`;
       const currentLvl = stateRef.current.currentLevel;
-      let scale = 0.85;
-      let speed = 1.0;
+      let scale = 1.0;
+      let speed = 0.14;
       let initialPosition: THREE.Vector3 | undefined = undefined;
 
       if (currentLvl === 1) {
-        scale = 1.0; // Clear, easy to spot when close
-        speed = 0.52; // Moving slowly as requested
-        // Pick one of the 8 real sectors to guarantee full 360-degree dispersal in the real environment
+        // High visibility scale and calm, slow hovering
+        scale = 1.35;
+        speed = 0.14;
         const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
         const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
         initialPosition = new THREE.Vector3(
-          basePos.x + (Math.random() - 0.5) * 0.8,
-          Math.max(0.7, Math.min(3.0, basePos.y + (Math.random() - 0.5) * 0.5)),
-          basePos.z + (Math.random() - 0.5) * 0.8
+          basePos.x + (Math.random() - 0.5) * 0.4,
+          Math.max(1.1, Math.min(2.1, basePos.y + (Math.random() - 0.5) * 0.3)),
+          basePos.z + (Math.random() - 0.5) * 0.4
         );
       } else if (currentLvl === 2) {
-        scale = 0.72; // Un poco más pequeños que los del nivel 1
-        speed = 0.92; // Un poco más rápidos y ágiles que los del nivel 1
-        // Dispersed across all 8 sectors of real space
+        // Clear scale, moderate calm speed (much slower than previous 0.92)
+        scale = 1.05;
+        speed = 0.22;
         const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
         const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
         initialPosition = new THREE.Vector3(
-          basePos.x + (Math.random() - 0.5) * 0.9,
-          Math.max(0.7, Math.min(3.0, basePos.y + (Math.random() - 0.5) * 0.6)),
-          basePos.z + (Math.random() - 0.5) * 0.9
+          basePos.x + (Math.random() - 0.5) * 0.5,
+          Math.max(1.1, Math.min(2.1, basePos.y + (Math.random() - 0.5) * 0.35)),
+          basePos.z + (Math.random() - 0.5) * 0.5
         );
       } else if (currentLvl === 3) {
         if (isBoss) {
-          scale = 3.6; // Giant Final Boss
-          speed = 0.6;
-          // Spawn right in front of the player in real space
-          initialPosition = new THREE.Vector3(0.0, 1.8, -2.2);
+          scale = 3.8; // Giant Final Boss, majestic and ominous
+          speed = 0.16;
+          // Spawn clearly in front of the player
+          initialPosition = new THREE.Vector3(0.0, 1.6, -1.85);
         } else {
-          scale = 0.72;
-          speed = 0.92;
+          scale = 1.05;
+          speed = 0.22;
           const basePos = REAL_SPACE_SPAWN_SECTORS[Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length)];
           initialPosition = new THREE.Vector3(basePos.x, basePos.y, basePos.z);
         }
@@ -494,6 +504,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         // Update active mosquitoes
         const cameraMatrixInverse = camera.matrixWorldInverse;
         const cameraPos = camera.position;
+        let minDistance = Infinity;
+        let closestRelPos: THREE.Vector3 | null = null;
 
         for (let i = mosquitoes.length - 1; i >= 0; i--) {
           const mos = mosquitoes[i];
@@ -502,8 +514,14 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           if (!mos.isDead) {
             // Calculate spatial audio position relative to camera view
             const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
-            const speedFactor = stateRef.current.currentLevel === 2 ? 1.35 : 1.0;
+            const speedFactor = stateRef.current.currentLevel === 2 ? 1.15 : 1.0;
             buzzManager.updateMosquitoBuzz(mos.id, relPos.x, relPos.y, relPos.z, mos.isBoss, speedFactor);
+
+            const dist = relPos.length();
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestRelPos = relPos;
+            }
           } else {
             // Dead mosquito animation timeout removal
             if (now - mos.deathTime > 900) {
@@ -512,9 +530,28 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             }
           }
         }
+
+        // Radar guidance for visual location
+        if (closestRelPos && minDistance < 15) {
+          const horizAngle = Math.atan2(closestRelPos.x, -closestRelPos.z) * (180 / Math.PI);
+          let dir: 'center' | 'left' | 'right' | 'behind' = 'center';
+          if (Math.abs(horizAngle) <= 28 && closestRelPos.z < 0) {
+            dir = 'center';
+          } else if (horizAngle > 28 && horizAngle < 130) {
+            dir = 'right';
+          } else if (horizAngle < -28 && horizAngle > -130) {
+            dir = 'left';
+          } else {
+            dir = 'behind';
+          }
+          onNearestMosquitoUpdateRef.current?.({ direction: dir, distance: minDistance });
+        } else {
+          onNearestMosquitoUpdateRef.current?.(null);
+        }
       } else {
-        // Paused or ended: stop all buzzing
+        // Paused or ended: stop all buzzing and clear radar
         buzzManager.stopAll();
+        onNearestMosquitoUpdateRef.current?.(null);
       }
 
       // Update particles

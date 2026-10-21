@@ -1,14 +1,15 @@
 /**
  * UIOverlay.tsx
- * Top bar sensor indicators, VU-meter, live timer, kill counter,
- * Level 3 Boss Scream Meter, crosshair swat reticle, AR mode toggle,
- * and 6DOF Spatial Motion controls & distance indicator.
+ * Clean, distraction-free AR combat HUD:
+ * - Top header with audio mute control
+ * - Game HUD (Level badge, kills/target counter, countdown timer, Boss scream gauge)
+ * - Subtle screen edge guidance arrows
+ * - Virtual joystick for movement
+ * - Instant tap/swat feedback reticle
  */
 
 import React, { useState, useEffect } from 'react';
 import {
-  Mic,
-  MicOff,
   Volume2,
   VolumeX,
   Clock,
@@ -16,48 +17,37 @@ import {
   Skull,
   Flame,
   Radio,
-  Move3d,
-  RotateCcw,
-  Sliders,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { SensorStatus, sensorManager } from '../sensors/SensorManager';
-import { GameState } from './ThreeCanvas';
+import { GameState, NearestMosquitoInfo } from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 import { VirtualJoystick } from './VirtualJoystick';
 
 interface UIOverlayProps {
   gameState: GameState;
-  sensorStatus: SensorStatus;
+  sensorStatus?: SensorStatus;
   currentVolume: number;
   isScreaming: boolean;
-  onCalibrateGyro: () => void;
+  onCalibrateGyro?: () => void;
   forwardDistance?: number;
+  nearestMosquito?: NearestMosquitoInfo | null;
 }
 
 export const UIOverlay: React.FC<UIOverlayProps> = ({
   gameState,
-  sensorStatus,
   currentVolume,
   isScreaming,
-  onCalibrateGyro,
-  forwardDistance = 0,
+  nearestMosquito,
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
-  const [sensitivityMode, setSensitivityMode] = useState<'normal' | 'high' | 'ultra'>('normal');
-  const [showSensitivityMenu, setShowSensitivityMenu] = useState(false);
 
   const toggleMute = () => {
     const nextMute = !isMuted;
     setIsMuted(nextMute);
     buzzManager.setMuted(nextMute);
-  };
-
-  const handleSetSensitivity = (mode: 'normal' | 'high' | 'ultra') => {
-    setSensitivityMode(mode);
-    if (mode === 'normal') sensorManager.motionSensitivity = 1.0;
-    if (mode === 'high') sensorManager.motionSensitivity = 1.6;
-    if (mode === 'ultra') sensorManager.motionSensitivity = 2.2;
   };
 
   // Screen click/tap slap visual feedback
@@ -102,173 +92,96 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 select-none">
-      {/* --- TOP STATUS BAR --- */}
-      <header className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2.5 backdrop-blur-md shadow-xl">
-        {/* Left: Sensor badges */}
-        <div className="flex items-center gap-2">
-          {/* Gyroscope & Motion Indicator */}
-          <button
-            onClick={onCalibrateGyro}
-            title="Centrar orientación y posición"
-            className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-950/40 px-2.5 py-1 text-xs font-medium text-cyan-300 transition hover:bg-cyan-900/60 active:scale-95"
-          >
-            <Move3d className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
-            <span className="hidden sm:inline">Tracking 6DOF</span>
-            <span className="text-[10px] text-cyan-300 font-mono font-bold">
-              {sensorStatus.motionActive || sensorStatus.gyroscopeActive ? 'ACTIVO' : 'MANUAL'}
-            </span>
-          </button>
-
-          {/* Spatial forward/backward displacement tag */}
-          <div className="hidden xs:flex items-center gap-1 rounded-xl border border-blue-500/30 bg-blue-950/40 px-2 py-1 text-[11px] font-mono text-blue-300">
-            <span>Avance:</span>
-            <span className={forwardDistance >= 0.1 ? 'text-emerald-400 font-bold' : forwardDistance <= -0.1 ? 'text-amber-400 font-bold' : 'text-slate-300'}>
-              {forwardDistance > 0 ? `+${forwardDistance.toFixed(1)}m` : `${forwardDistance.toFixed(1)}m`}
-            </span>
-          </div>
-
-          {/* Mic VU-Meter */}
-          <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1 text-xs text-emerald-300">
-            {sensorStatus.micActive ? (
-              <Mic className="h-3.5 w-3.5 text-emerald-400" />
-            ) : (
-              <MicOff className="h-3.5 w-3.5 text-red-400" />
-            )}
-            <span className="hidden sm:inline">Mic</span>
-            {/* Realtime VU Bar */}
-            <div className="flex h-2.5 w-12 items-center gap-0.5 rounded bg-slate-950/60 p-0.5">
-              {[0.15, 0.35, 0.55, 0.75, 0.9].map((thresh, idx) => (
-                <div
-                  key={idx}
-                  className={`h-full flex-1 rounded-xs transition-colors duration-75 ${
-                    currentVolume >= thresh
-                      ? idx >= 3
-                        ? 'bg-rose-500 animate-pulse'
-                        : idx >= 2
-                        ? 'bg-amber-400'
-                        : 'bg-emerald-400'
-                      : 'bg-slate-700/50'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Controls (Sensitivity, AR Mode & Mute) */}
-        <div className="flex items-center gap-2">
-          {/* Motion Sensitivity Menu */}
-          <div className="relative pointer-events-auto">
-            <button
-              onClick={() => setShowSensitivityMenu(!showSensitivityMenu)}
-              className="flex items-center gap-1 rounded-xl border border-white/10 bg-slate-800/80 px-2 py-1 text-xs text-slate-300 transition hover:bg-slate-700 active:scale-95"
-              title="Ajustar sensibilidad de movimiento"
-            >
-              <Sliders className="h-3 w-3" />
-              <span className="text-[10px] uppercase font-bold">{sensitivityMode}</span>
-            </button>
-            {showSensitivityMenu && (
-              <div className="absolute right-0 top-full mt-1 flex flex-col gap-1 rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl z-30 min-w-28">
-                <span className="text-[10px] text-slate-400 px-2 py-0.5 font-semibold">Sensibilidad</span>
-                {(['normal', 'high', 'ultra'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => {
-                      handleSetSensitivity(mode);
-                      setShowSensitivityMenu(false);
-                    }}
-                    className={`rounded-lg px-2 py-1 text-left text-xs font-medium transition capitalize ${
-                      sensitivityMode === mode ? 'bg-rose-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    {mode === 'normal' ? 'Normal (Fiel 1.0x)' : mode === 'high' ? 'Ágil (1.6x)' : 'Dinámico (2.2x)'}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
+      {/* --- TOP ROW: AUDIO CONTROLS & HUD --- */}
+      <div className="flex flex-col gap-2 w-full">
+        {/* Top bar right control */}
+        <div className="flex items-center justify-end w-full">
           <button
             onClick={toggleMute}
-            className="pointer-events-auto rounded-xl border border-white/10 bg-slate-800/80 p-1.5 text-slate-300 transition hover:bg-slate-700 active:scale-95"
+            aria-label={isMuted ? 'Activar sonido' : 'Silenciar'}
+            className="pointer-events-auto flex items-center justify-center rounded-full border border-white/15 bg-black/60 p-2.5 text-slate-200 transition hover:bg-black/80 hover:text-white active:scale-95 backdrop-blur-md shadow-xl"
           >
-            {isMuted ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4 text-emerald-400" />}
+            {isMuted ? (
+              <VolumeX className="h-5 w-5 text-rose-400" />
+            ) : (
+              <Volume2 className="h-5 w-5 text-emerald-400" />
+            )}
           </button>
         </div>
-      </header>
 
-      {/* --- LEVEL OBJECTIVE & TIMER HUD --- */}
-      <div className="flex flex-col items-center gap-2">
-        <div className="flex items-center justify-between gap-4 rounded-full border border-white/15 bg-black/70 px-5 py-2 backdrop-blur-md shadow-2xl">
-          {/* Level Badge */}
-          <div className="flex items-center gap-1.5">
-            <span className="rounded-md bg-rose-600/90 px-2 py-0.5 text-xs font-bold tracking-wider text-white">
-              NIVEL {gameState.currentLevel}
-            </span>
+        {/* --- LEVEL OBJECTIVE & TIMER HUD --- */}
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex items-center justify-between gap-4 rounded-full border border-white/15 bg-black/75 px-5 py-2 backdrop-blur-md shadow-2xl">
+            {/* Level Badge */}
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-md bg-rose-600/90 px-2 py-0.5 text-xs font-bold tracking-wider text-white">
+                NIVEL {gameState.currentLevel}
+              </span>
+            </div>
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            {/* Kill Progress or Boss Status */}
+            {gameState.currentLevel < 3 ? (
+              <div className="flex items-center gap-1.5 text-sm font-bold text-slate-100">
+                <Target className="h-4 w-4 text-rose-400" />
+                <span>
+                  {gameState.kills} / {gameState.targetKills}
+                </span>
+                <span className="text-xs text-slate-400 font-normal hidden sm:inline">mosquitos</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-sm font-black text-rose-400 animate-pulse">
+                <Skull className="h-4 w-4 text-red-500" />
+                <span>MOSQUITO GIGANTE</span>
+              </div>
+            )}
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            {/* Timer */}
+            <div className="flex items-center gap-1.5 font-mono text-sm font-bold">
+              <Clock className={`h-4 w-4 ${timerColor}`} />
+              <span className={timerColor}>{gameState.timeLeft}s</span>
+            </div>
           </div>
 
-          <div className="h-4 w-[1px] bg-white/20" />
+          {/* BOSS SCREAM GAUGE (Level 3 only) */}
+          {gameState.currentLevel === 3 && (
+            <div className="w-full max-w-sm rounded-2xl border-2 border-rose-500/40 bg-black/85 p-3 backdrop-blur-xl shadow-2xl">
+              <div className="flex items-center justify-between text-xs font-bold text-rose-300">
+                <span className="flex items-center gap-1.5">
+                  <Flame className="h-4 w-4 text-amber-400 animate-bounce" />
+                  ¡GRITA LO MÁS FUERTE POSIBLE!
+                </span>
+                <span className="font-mono text-amber-300">
+                  {gameState.screamSecondsAccumulated.toFixed(1)}s / 10s
+                </span>
+              </div>
 
-          {/* Kill Progress or Boss Status */}
-          {gameState.currentLevel < 3 ? (
-            <div className="flex items-center gap-1.5 text-sm font-bold text-slate-100">
-              <Target className="h-4 w-4 text-rose-400" />
-              <span>
-                {gameState.kills} / {gameState.targetKills}
-              </span>
-              <span className="text-xs text-slate-400 font-normal hidden sm:inline">mosquitos</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-sm font-black text-rose-400 animate-pulse">
-              <Skull className="h-4 w-4 text-red-500" />
-              <span>MOSQUITO GIGANTE</span>
+              {/* Scream Progress Bar */}
+              <div className="mt-2 h-4 w-full overflow-hidden rounded-full bg-slate-900 border border-rose-900/60 p-0.5">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 transition-all duration-100"
+                  style={{ width: `${screamPercent}%` }}
+                />
+              </div>
+
+              {/* Live scream status badge */}
+              <div className="mt-1.5 flex items-center justify-center gap-1 text-[11px]">
+                {isScreaming ? (
+                  <span className="font-bold text-amber-400 animate-pulse flex items-center gap-1">
+                    <Radio className="h-3 w-3" /> ¡DAÑANDO AL MOSQUITO GIGANTE!
+                  </span>
+                ) : (
+                  <span className="text-slate-400">
+                    Volumen actual: {Math.round(currentVolume * 100)}% (necesitas &gt; 62% para grito)
+                  </span>
+                )}
+              </div>
             </div>
           )}
-
-          <div className="h-4 w-[1px] bg-white/20" />
-
-          {/* Timer */}
-          <div className="flex items-center gap-1.5 font-mono text-sm font-bold">
-            <Clock className={`h-4 w-4 ${timerColor}`} />
-            <span className={timerColor}>{gameState.timeLeft}s</span>
-          </div>
         </div>
-
-        {/* BOSS SCREAM GAUGE (Level 3 only) */}
-        {gameState.currentLevel === 3 && (
-          <div className="w-full max-w-sm rounded-2xl border-2 border-rose-500/40 bg-black/85 p-3 backdrop-blur-xl shadow-2xl">
-            <div className="flex items-center justify-between text-xs font-bold text-rose-300">
-              <span className="flex items-center gap-1.5">
-                <Flame className="h-4 w-4 text-amber-400 animate-bounce" />
-                ¡GRITA LO MÁS FUERTE POSIBLE!
-              </span>
-              <span className="font-mono text-amber-300">
-                {gameState.screamSecondsAccumulated.toFixed(1)}s / 10s
-              </span>
-            </div>
-
-            {/* Scream Progress Bar */}
-            <div className="mt-2 h-4 w-full overflow-hidden rounded-full bg-slate-900 border border-rose-900/60 p-0.5">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 transition-all duration-100"
-                style={{ width: `${screamPercent}%` }}
-              />
-            </div>
-
-            {/* Live scream status badge */}
-            <div className="mt-1.5 flex items-center justify-center gap-1 text-[11px]">
-              {isScreaming ? (
-                <span className="font-bold text-amber-400 animate-pulse flex items-center gap-1">
-                  <Radio className="h-3 w-3" /> ¡DAÑANDO AL MOSQUITO GIGANTE!
-                </span>
-              ) : (
-                <span className="text-slate-400">
-                  Volumen actual: {Math.round(currentVolume * 100)}% (necesitas &gt; 62% para grito)
-                </span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* --- RETICLE / TAP SQUISH FEEDBACK --- */}
@@ -281,12 +194,23 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* --- BOTTOM CONTROLS: VIRTUAL JOYSTICK & RECENTER --- */}
-      <footer className="flex flex-col gap-2 pb-1 pointer-events-none">
-        {/* Main bottom row */}
-        <div className="flex items-end justify-between w-full px-1">
-          {/* Virtual Joystick for 360-degree touch movement (Bottom Left) */}
-          <div className="pointer-events-auto pl-1 pb-1">
+      {/* --- SCREEN EDGE ARROWS (Subtle Directional Guidance) --- */}
+      {gameState.isPlaying && nearestMosquito && nearestMosquito.direction === 'left' && (
+        <div className="pointer-events-none fixed left-3 top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border border-amber-400/50 bg-black/75 p-3 text-amber-400 shadow-2xl backdrop-blur-md animate-pulse">
+          <ChevronLeft className="h-8 w-8 text-amber-400 stroke-[2.5]" />
+        </div>
+      )}
+      {gameState.isPlaying && nearestMosquito && nearestMosquito.direction === 'right' && (
+        <div className="pointer-events-none fixed right-3 top-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border border-amber-400/50 bg-black/75 p-3 text-amber-400 shadow-2xl backdrop-blur-md animate-pulse">
+          <ChevronRight className="h-8 w-8 text-amber-400 stroke-[2.5]" />
+        </div>
+      )}
+
+      {/* --- BOTTOM CONTROLS: VIRTUAL JOYSTICK ONLY --- */}
+      <footer className="pb-3 pl-2 pointer-events-none">
+        <div className="flex items-end justify-between w-full">
+          {/* Virtual Joystick for touch movement (Bottom Left) */}
+          <div className="pointer-events-auto">
             <VirtualJoystick
               size={120}
               onMove={(vec) => {
@@ -294,28 +218,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               }}
             />
           </div>
-
-          {/* Right Bottom Actions: Recenter Button & Displacement Badge */}
-          <div className="flex flex-col items-end gap-2 pr-1 pb-2 pointer-events-auto">
-            {/* Quick Recenter Orientation Button */}
-            <button
-              onClick={onCalibrateGyro}
-              className="flex items-center gap-1.5 rounded-2xl border border-cyan-500/40 bg-slate-900/85 px-3.5 py-2.5 text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800 backdrop-blur-md shadow-xl transition active:scale-95"
-              title="Re-centrar orientación y posición al origen"
-            >
-              <RotateCcw className="h-4 w-4 text-cyan-400" />
-              <span>Centrar Posición</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Dynamic Tip */}
-        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-none mx-auto max-w-xl">
-          <span className="text-cyan-400 font-semibold flex items-center gap-1">
-            📷 Cámara de tu entorno real • 📱 Camina o usa el joystick para moverte
-          </span>
-          <span className="text-slate-500 hidden sm:inline">•</span>
-          <span className="text-rose-300 hidden sm:inline">🎧 Sigue el zumbido 3D y toca la pantalla para cazar</span>
         </div>
       </footer>
     </div>

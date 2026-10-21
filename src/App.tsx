@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ThreeCanvas, GameState } from './components/ThreeCanvas';
+import { ThreeCanvas, GameState, NearestMosquitoInfo } from './components/ThreeCanvas';
 import { UIOverlay } from './components/UIOverlay';
 import { PermissionsModal } from './components/PermissionsModal';
 import { LevelModal } from './components/LevelModal';
@@ -56,6 +56,7 @@ export default function App() {
   const [isScreaming, setIsScreaming] = useState(false);
   const [forwardDistance, setForwardDistance] = useState(0);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(() => sensorManager.getCameraStream());
+  const [nearestMosquito, setNearestMosquito] = useState<NearestMosquitoInfo | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerIntervalRef = useRef<number | null>(null);
@@ -249,18 +250,7 @@ export default function App() {
         />
       </div>
 
-      {/* Fallback Viewport if camera permission is connecting or not yet granted */}
-      {!cameraStream && (
-        <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-radial from-slate-900 to-black p-6 text-center pointer-events-none">
-          <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl border border-rose-500/30 bg-slate-900/90 shadow-2xl">
-            <span className="text-4xl animate-pulse">📷</span>
-          </div>
-          <h3 className="mt-4 text-lg font-bold text-white">Cámara Trasera (Entorno Real)</h3>
-          <p className="mt-1 max-w-xs text-xs text-slate-300">
-            Conectando cámara para proyectar los mosquitos en tu habitación física...
-          </p>
-        </div>
-      )}
+
 
       {/* 3D WebGL Canvas Layer */}
       <ThreeCanvas
@@ -274,6 +264,7 @@ export default function App() {
         onScreamProgress={handleScreamProgress}
         isARMode={gameState.isARMode}
         videoElement={null}
+        onNearestMosquitoUpdate={setNearestMosquito}
       />
 
       {/* HUD & Sensor Overlay */}
@@ -284,6 +275,7 @@ export default function App() {
         isScreaming={isScreaming}
         onCalibrateGyro={handleCalibrateGyro}
         forwardDistance={forwardDistance}
+        nearestMosquito={nearestMosquito}
       />
 
       {/* Onboarding & Sensor Permissions Modal */}
