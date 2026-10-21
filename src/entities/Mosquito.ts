@@ -60,27 +60,26 @@ export class Mosquito {
     if (options.initialPosition) {
       this.group.position.copy(options.initialPosition);
     } else {
-      // Spawn dispersal
+      // 360-degree spawn dispersal in real-world space around player
       const spawnDist =
         options.spawnDistance ||
         (this.isBoss
-          ? 5.5
+          ? 3.2
           : this.level === 1
-          ? 3.5 + Math.random() * 3.5
-          : 3.5 + Math.random() * 3.0);
+          ? 2.0 + Math.random() * 2.2
+          : 2.2 + Math.random() * 2.0);
 
       const flightAngle = options.spawnAngle !== undefined ? options.spawnAngle : Math.random() * Math.PI * 2;
-      const flightPitch = options.spawnPitch !== undefined ? options.spawnPitch : (Math.random() - 0.45) * 1.3;
+      const flightPitch = options.spawnPitch !== undefined ? options.spawnPitch : (Math.random() - 0.4) * 0.9;
 
-      // Initial spawn coordinates strictly inside 3D bedroom walls
-      const spawnX = Math.max(-3.8, Math.min(3.8, Math.cos(flightAngle) * Math.cos(flightPitch) * spawnDist));
-      const spawnY = Math.max(0.7, Math.min(3.3, 1.4 + Math.sin(flightPitch) * spawnDist * 0.45));
-      const spawnZ = Math.max(-3.6, Math.min(3.6, Math.sin(flightAngle) * Math.cos(flightPitch) * spawnDist));
+      const spawnX = Math.cos(flightAngle) * Math.cos(flightPitch) * spawnDist;
+      const spawnY = Math.max(0.8, Math.min(2.8, 1.5 + Math.sin(flightPitch) * spawnDist));
+      const spawnZ = Math.sin(flightAngle) * Math.cos(flightPitch) * spawnDist;
 
       this.group.position.set(spawnX, spawnY, spawnZ);
     }
 
-    // Initialize first flight destination across the room
+    // Initialize first flight destination in real space
     this.pickNextWaypoint();
 
     // Initial velocity pointed towards first waypoint
@@ -192,36 +191,23 @@ export class Mosquito {
   }
 
   /**
-   * Choose a new 3D flight destination inside the bedroom bounds
+   * Choose a new 3D flight destination in real-world space around the player
    */
-  private pickNextWaypoint() {
-    const minX = -3.8;
-    const maxX = 3.8;
-    const minY = 0.75;
-    const maxY = 3.3;
-    const minZ = -3.6;
-    const maxZ = 3.6;
+  private pickNextWaypoint(centerPos?: THREE.Vector3) {
+    const cx = centerPos ? centerPos.x : 0;
+    const cy = centerPos ? centerPos.y : 1.6;
+    const cz = centerPos ? centerPos.z : 0;
 
-    let targetX: number;
-    let targetY: number;
-    let targetZ: number;
-
-    // Both in Level 1 & Level 2, cross the room dynamically between sectors
-    if (Math.random() > 0.25) {
-      const currentSignX = Math.sign(this.group.position.x || 1);
-      const currentSignZ = Math.sign(this.group.position.z || 1);
-      targetX = -currentSignX * (1.2 + Math.random() * 2.5);
-      targetZ = -currentSignZ * (1.2 + Math.random() * 2.3);
-      targetY = minY + Math.random() * (maxY - minY);
-    } else {
-      targetX = minX + Math.random() * (maxX - minX);
-      targetY = minY + Math.random() * (maxY - minY);
-      targetZ = minZ + Math.random() * (maxZ - minZ);
-    }
+    // Pick 360-degree angle around player
+    const angle = Math.random() * Math.PI * 2;
+    const dist = this.isBoss ? 1.8 + Math.random() * 1.5 : (1.2 + Math.random() * 2.8);
+    const targetX = cx + Math.cos(angle) * dist;
+    const targetZ = cz + Math.sin(angle) * dist;
+    const targetY = Math.max(0.6, Math.min(3.2, cy + (Math.random() - 0.5) * 1.6));
 
     this.currentWaypoint.set(targetX, targetY, targetZ);
     this.waypointTimer = 0;
-    this.maxWaypointInterval = this.level === 1 ? 6.5 + Math.random() * 3.5 : 3.2 + Math.random() * 2.2;
+    this.maxWaypointInterval = this.level === 1 ? 5.5 + Math.random() * 3.0 : 2.8 + Math.random() * 2.0;
   }
 
   /**
@@ -254,13 +240,13 @@ export class Mosquito {
       this.group.position.z += (Math.random() - 0.5) * shakeAmt;
     }
 
-    // --- Dynamic Cruising Flight (Inside bedroom) ---
+    // --- Dynamic Cruising Flight in Real Space ---
     this.waypointTimer += delta;
     const distToWaypoint = this.group.position.distanceTo(this.currentWaypoint);
 
     // Pick new waypoint when reached or after flight timer expires
-    if (distToWaypoint < 1.4 || this.waypointTimer >= this.maxWaypointInterval) {
-      this.pickNextWaypoint();
+    if (distToWaypoint < 1.0 || this.waypointTimer >= this.maxWaypointInterval) {
+      this.pickNextWaypoint(playerPos);
     }
 
     // Desired direction towards waypoint
@@ -277,7 +263,7 @@ export class Mosquito {
     desiredDir.z += wavyOffsetZ;
     desiredDir.normalize();
 
-    // Target velocity: slow, gentle cruising in Level 1 (0.85m/s - 1.1m/s), slightly faster cruising in Level 2 (~1.9m/s)
+    // Target velocity: slow, gentle cruising in Level 1, slightly faster in Level 2
     const cruiseMultiplier = this.level === 1 ? 1.7 : 2.1;
     const targetVelocity = desiredDir.multiplyScalar(this.speed * cruiseMultiplier);
 
@@ -285,13 +271,18 @@ export class Mosquito {
     const steeringLerp = this.level === 1 ? 1.5 : 2.6;
     this.flightVelocity.lerp(targetVelocity, delta * steeringLerp);
 
-    // Advance position through the room
+    // Advance position through real space
     this.group.position.addScaledVector(this.flightVelocity, delta);
 
-    // Strict bedroom boundary clamping so mosquitoes never leave the room
-    this.group.position.x = Math.max(-3.85, Math.min(3.85, this.group.position.x));
-    this.group.position.y = Math.max(0.4, Math.min(3.4, this.group.position.y));
-    this.group.position.z = Math.max(-3.65, Math.min(3.65, this.group.position.z));
+    // Keep mosquitoes within reasonable distance of player in real space
+    const horizontalDistToPlayer = Math.hypot(this.group.position.x - playerPos.x, this.group.position.z - playerPos.z);
+    if (horizontalDistToPlayer > 5.5) {
+      const returnDir = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z).sub(this.group.position).normalize();
+      this.flightVelocity.lerp(returnDir.multiplyScalar(this.speed * 2.0), delta * 3.0);
+    }
+
+    // Floor and ceiling bounds relative to standing height
+    this.group.position.y = Math.max(0.4, Math.min(3.6, this.group.position.y));
 
     // Look towards velocity vector & bank body into turns
     if (this.flightVelocity.lengthSq() > 0.001) {

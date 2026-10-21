@@ -79,24 +79,24 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
             </div>
 
             <h1 className="text-3xl font-black tracking-tight text-white uppercase">
-              Mosquito Attack
+              Mosquito Attack AR
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              Experiencia web inmersiva 3D controlada por el <strong className="text-rose-400">movimiento físico de tu teléfono</strong> y <strong className="text-amber-400">niveles de audio</strong>.
+              Experiencia en tu <strong className="text-rose-400">entorno real con cámara</strong>, controlada por el <strong className="text-cyan-400">movimiento físico de tu teléfono</strong> y <strong className="text-amber-400">niveles de audio</strong>.
             </p>
 
             <div className="my-5 w-full rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-left text-xs space-y-2.5 text-slate-300">
               <div className="flex items-start gap-2.5">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold">1</span>
-                <span><strong>Apunta y desplázate con tu celular</strong>: da pasos, empuja o inclina el celular para avanzar/retroceder físicamente (o usa el mando táctil).</span>
+                <span><strong>Cámara en vivo de tu entorno:</strong> los mosquitos vuelan en tu habitación o espacio físico real.</span>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold">2</span>
-                <span><strong>Toca la pantalla</strong> para aplastarlos con retroalimentación háptica.</span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-cyan-400 font-bold">2</span>
+                <span><strong>Muévete y da pasos</strong> para acercarte o alejarte físicamente (o usa el mando táctil en pantalla).</span>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-400 font-bold">3</span>
-                <span><strong>En el Jefe Final:</strong> ¡deberás <strong className="text-amber-400">GRITAR durante 10 segundos</strong> para destruirlo!</span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400 font-bold">3</span>
+                <span><strong>Toca la pantalla</strong> para aplastarlos y en el Nivel 3 <strong className="text-amber-400">¡GRITA 10 segundos!</strong></span>
               </div>
             </div>
 
@@ -154,18 +154,18 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
               </div>
 
               {/* Camera item */}
-              <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-left">
+              <div className="flex items-center justify-between rounded-xl border border-rose-500/30 bg-slate-900/60 p-3 text-left">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-950/60 text-indigo-400">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-950/60 text-rose-400">
                     <Camera className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold">Cámara (Modo AR)</h3>
-                    <p className="text-[11px] text-slate-400">Caza en tu propia habitación (opcional)</p>
+                    <h3 className="text-sm font-semibold">Cámara Trasera (Entorno Real)</h3>
+                    <p className="text-[11px] text-slate-400">Tu habitación o entorno físico como escenario</p>
                   </div>
                 </div>
-                <span className={`text-xs font-semibold ${cameraState === 'granted' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {cameraState === 'granted' ? 'Listo' : 'Opcional'}
+                <span className={`text-xs font-semibold ${cameraState === 'granted' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {cameraState === 'granted' ? 'Listo' : 'Requerido'}
                 </span>
               </div>
             </div>

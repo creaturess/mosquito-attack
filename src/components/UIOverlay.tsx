@@ -193,14 +193,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
           <button
             onClick={onToggleAR}
-            className={`pointer-events-auto flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition active:scale-95 ${
-              gameState.isARMode
-                ? 'border-indigo-400 bg-indigo-600 text-white shadow-lg shadow-indigo-500/20'
-                : 'border-white/10 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-            }`}
+            title="Cambiar o activar cámara trasera / frontal"
+            className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 transition active:scale-95 shadow-md"
           >
-            <Camera className="h-3.5 w-3.5" />
-            <span>{gameState.isARMode ? 'AR ON' : '3D Noche'}</span>
+            <Camera className="h-3.5 w-3.5 text-rose-400" />
+            <span>Cámara en Vivo</span>
           </button>
 
           <button
@@ -327,10 +324,10 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         {/* Dynamic Tip */}
         <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-none mx-auto max-w-xl">
           <span className="text-cyan-400 font-semibold flex items-center gap-1">
-            📱 Camina, da pasos o inclina el celular para avanzar/retroceder • 🕹️ Mando táctil opcional
+            📷 Cámara de tu entorno real • 📱 Camina o usa el joystick para moverte
           </span>
           <span className="text-slate-500 hidden sm:inline">•</span>
-          <span className="text-slate-300 hidden sm:inline">🎧 Sigue el zumbido 3D y aplasta al tocar</span>
+          <span className="text-rose-300 hidden sm:inline">🎧 Sigue el zumbido 3D y toca la pantalla para cazar</span>
         </div>
       </footer>
     </div>

@@ -43,11 +43,11 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
           <p className="mt-2 text-xs text-slate-300">
             {level === 1 &&
-              'Aclimatación: Mosquitos dispersos en la habitación volando calmadamente. Guíate principalmente por su zumbido 3D para encontrarlos.'}
+              'Aclimatación: Mosquitos dispersos en tu entorno real volando calmadamente. Apunta con la cámara y guíate por su zumbido 3D para encontrarlos.'}
             {level === 2 &&
-              'Los mosquitos son un poco más pequeños y se mueven más rápido por toda la habitación. Sigue su zumbido agudo y elimínalos con rapidez.'}
+              'Los mosquitos son un poco más pequeños y se mueven más rápido en tu espacio físico. Sigue su zumbido agudo y elimínalos con rapidez.'}
             {level === 3 &&
-              '¡El Mosquito Gigante ha aparecido! Para derrotarlo debes GRITAR lo más fuerte posible durante 10 segundos.'}
+              '¡El Mosquito Gigante ha aparecido frente a ti en tu entorno! Para derrotarlo debes GRITAR lo más fuerte posible durante 10 segundos.'}
           </p>
 
           <div className="my-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-3 text-left">
@@ -119,7 +119,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
           <h2 className="text-3xl font-black text-amber-300">¡VICTORIA TOTAL!</h2>
           <p className="mt-2 text-sm text-slate-200">
-            ¡Tu grito ha desintegrado al <strong className="text-rose-400">Mosquito Gigante</strong>! Has liberado la habitación de la plaga.
+            ¡Tu grito ha desintegrado al <strong className="text-rose-400">Mosquito Gigante</strong>! Has liberado tu entorno de la plaga.
           </p>
 
           <div className="my-5 rounded-2xl border border-amber-500/30 bg-black/50 p-3 text-xs text-amber-200 font-mono">

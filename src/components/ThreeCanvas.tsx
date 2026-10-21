@@ -9,7 +9,6 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Mosquito } from '../entities/Mosquito';
 import { ParticleSystem } from '../entities/ParticleSystem';
-import { RoomEnvironment } from '../entities/RoomEnvironment';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
@@ -72,9 +71,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
 
-    // --- 1. Scene, Camera, Renderer ---
+    // --- 1. Scene, Camera, Transparent Renderer ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060913, 0.04);
+    // No fog to keep real-world camera video crisp and transparent
 
     const camera = new THREE.PerspectiveCamera(
       70,
@@ -82,7 +81,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       0.1,
       100
     );
-    camera.position.set(0.2, 1.6, 1.4);
+    camera.position.set(0.0, 1.6, 0.0);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
@@ -90,59 +89,32 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       alpha: true,
       powerPreference: 'high-performance',
     });
+    renderer.setClearColor(0x000000, 0); // Transparent WebGL background for live camera
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    // --- 2. Lighting & Flashlight ---
-    // Flashlight attached to camera (player's phone light)
-    const flashlight = new THREE.SpotLight(0xfffaec, 2.6, 16, Math.PI / 4, 0.45, 1.3);
+    // --- 2. Lighting & Phone Flashlight for AR ---
+    // Ambient light so mosquitoes are clearly visible in any real-world lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff5ea, 1.2);
+    dirLight.position.set(3, 6, 2);
+    scene.add(dirLight);
+
+    // Flashlight attached to camera (player's phone light for hunting in real dark rooms)
+    const flashlight = new THREE.SpotLight(0xfffaec, 2.4, 14, Math.PI / 4, 0.45, 1.2);
     flashlight.position.set(0, 0, 0);
     camera.add(flashlight);
     flashlight.target.position.set(0, 0, -1);
     camera.add(flashlight.target);
     scene.add(camera);
 
-    // --- 3. Aesthetic Gaming Bedroom (from reference image) ---
-    const roomGroup = new THREE.Group();
-    const bedroom = new RoomEnvironment();
-    roomGroup.add(bedroom.group);
-    scene.add(roomGroup);
-
-    // --- 4. Video Texture for AR Camera (when active) ---
-    let videoTexture: THREE.VideoTexture | null = null;
-    let arBackgroundMesh: THREE.Mesh | null = null;
-
-    const setupARBackground = () => {
-      if (videoElementRef.current && isARModeRef.current) {
-        if (!videoTexture) {
-          videoTexture = new THREE.VideoTexture(videoElementRef.current);
-          videoTexture.minFilter = THREE.LinearFilter;
-          videoTexture.magFilter = THREE.LinearFilter;
-        }
-        if (!arBackgroundMesh) {
-          const bgGeo = new THREE.PlaneGeometry(2, 2);
-          const bgMat = new THREE.MeshBasicMaterial({
-            map: videoTexture,
-            depthTest: false,
-            depthWrite: false,
-          });
-          arBackgroundMesh = new THREE.Mesh(bgGeo, bgMat);
-          arBackgroundMesh.renderOrder = -100;
-          // Orthographic background or camera fixed plane
-          const bgScene = new THREE.Scene();
-          const bgCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-          bgScene.add(arBackgroundMesh);
-          return { bgScene, bgCam };
-        }
-      }
-      return null;
-    };
-
-    // --- 5. Particle System ---
+    // --- 3. Particle System ---
     const particles = new ParticleSystem();
     scene.add(particles.group);
 
-    // --- 6. Mosquito Population Management ---
+    // --- 4. Mosquito Population Management ---
     let mosquitoes: Mosquito[] = [];
     let nextMosquitoId = 1;
     let spawnTimer = 0;
@@ -150,27 +122,27 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let accumulatedScreamTime = 0;
     let bossInstance: Mosquito | null = null;
 
-    // 8 distinct room sectors spanning the ENTIRE bedroom:
-    const BEDROOM_SPAWN_SECTORS = [
-      // 1. Over the floating bed & pillows (Back-Left)
-      new THREE.Vector3(-2.2, 1.4, -2.4),
-      // 2. High Wall Shelves & Hanging Plant (Top-Left Wall)
-      new THREE.Vector3(-3.5, 2.9, -1.2),
-      // 3. Curved Ultrawide Monitor & Desk (Back-Right)
-      new THREE.Vector3(1.6, 1.5, -2.5),
-      // 4. Glowing RGB PC Tower & Far Right Corner
-      new THREE.Vector3(3.4, 1.8, -1.6),
-      // 5. High Ceiling Center (Above the room)
-      new THREE.Vector3(0.0, 3.2, -0.4),
-      // 6. Behind Player, Left Corner / Curtains
-      new THREE.Vector3(-3.2, 1.6, 2.6),
-      // 7. Behind Player, Right Entrance Door Corner
-      new THREE.Vector3(3.0, 1.5, 2.8),
-      // 8. Low near Gamer Chair Wheels & Floor
-      new THREE.Vector3(1.3, 0.75, -0.6),
+    // 8 distinct 360-degree spatial sectors around the player in real physical space:
+    const REAL_SPACE_SPAWN_SECTORS = [
+      // 1. Directly Ahead (Front Center, eye-level)
+      new THREE.Vector3(0.0, 1.6, -2.2),
+      // 2. Front-Right (Elevated)
+      new THREE.Vector3(1.8, 2.3, -1.8),
+      // 3. Right Flank (Around ear level)
+      new THREE.Vector3(2.4, 1.7, 0.2),
+      // 4. Behind-Right (Deep right rear)
+      new THREE.Vector3(1.9, 1.8, 2.0),
+      // 5. Directly Behind (Rear center)
+      new THREE.Vector3(0.0, 1.9, 2.4),
+      // 6. Behind-Left (Deep left rear)
+      new THREE.Vector3(-1.9, 1.8, 2.0),
+      // 7. Left Flank (Around ear level)
+      new THREE.Vector3(-2.4, 1.7, 0.2),
+      // 8. Front-Left (Lower elevation)
+      new THREE.Vector3(-1.8, 1.1, -1.8),
     ];
 
-    // Helper to spawn a mosquito
+    // Helper to spawn a mosquito in real physical space
     const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number) => {
       const id = `mosquito_${nextMosquitoId++}`;
       const currentLvl = stateRef.current.currentLevel;
@@ -181,34 +153,35 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       if (currentLvl === 1) {
         scale = 1.0; // Clear, easy to spot when close
         speed = 0.52; // Moving slowly as requested
-        // Pick one of the 8 bedroom sectors to guarantee full dispersal across the room
-        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length);
-        const basePos = BEDROOM_SPAWN_SECTORS[secIdx % BEDROOM_SPAWN_SECTORS.length];
+        // Pick one of the 8 real sectors to guarantee full 360-degree dispersal in the real environment
+        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
+        const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
         initialPosition = new THREE.Vector3(
-          Math.max(-3.8, Math.min(3.8, basePos.x + (Math.random() - 0.5) * 0.6)),
-          Math.max(0.7, Math.min(3.3, basePos.y + (Math.random() - 0.5) * 0.4)),
-          Math.max(-3.6, Math.min(3.6, basePos.z + (Math.random() - 0.5) * 0.6))
+          basePos.x + (Math.random() - 0.5) * 0.8,
+          Math.max(0.7, Math.min(3.0, basePos.y + (Math.random() - 0.5) * 0.5)),
+          basePos.z + (Math.random() - 0.5) * 0.8
         );
       } else if (currentLvl === 2) {
         scale = 0.72; // Un poco más pequeños que los del nivel 1
         speed = 0.92; // Un poco más rápidos y ágiles que los del nivel 1
-        // Dispersed across all 8 sectors of the bedroom
-        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length);
-        const basePos = BEDROOM_SPAWN_SECTORS[secIdx % BEDROOM_SPAWN_SECTORS.length];
+        // Dispersed across all 8 sectors of real space
+        const secIdx = sectorIndex !== undefined ? sectorIndex : Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length);
+        const basePos = REAL_SPACE_SPAWN_SECTORS[secIdx % REAL_SPACE_SPAWN_SECTORS.length];
         initialPosition = new THREE.Vector3(
-          Math.max(-3.8, Math.min(3.8, basePos.x + (Math.random() - 0.5) * 0.7)),
-          Math.max(0.7, Math.min(3.3, basePos.y + (Math.random() - 0.5) * 0.5)),
-          Math.max(-3.6, Math.min(3.6, basePos.z + (Math.random() - 0.5) * 0.7))
+          basePos.x + (Math.random() - 0.5) * 0.9,
+          Math.max(0.7, Math.min(3.0, basePos.y + (Math.random() - 0.5) * 0.6)),
+          basePos.z + (Math.random() - 0.5) * 0.9
         );
       } else if (currentLvl === 3) {
         if (isBoss) {
           scale = 3.6; // Giant Final Boss
           speed = 0.6;
-          initialPosition = new THREE.Vector3(0.0, 2.0, -1.8);
+          // Spawn right in front of the player in real space
+          initialPosition = new THREE.Vector3(0.0, 1.8, -2.2);
         } else {
           scale = 0.72;
           speed = 0.92;
-          const basePos = BEDROOM_SPAWN_SECTORS[Math.floor(Math.random() * BEDROOM_SPAWN_SECTORS.length)];
+          const basePos = REAL_SPACE_SPAWN_SECTORS[Math.floor(Math.random() * REAL_SPACE_SPAWN_SECTORS.length)];
           initialPosition = new THREE.Vector3(basePos.x, basePos.y, basePos.z);
         }
       }
@@ -255,13 +228,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           spawnMosquito(false, i);
         }
       } else if (stateRef.current.currentLevel === 1) {
-        // Initial wave of 8 mosquitoes dispersed across ALL 8 sectors of the bedroom!
-        for (let i = 0; i < BEDROOM_SPAWN_SECTORS.length; i++) {
+        // Initial wave of 8 mosquitoes dispersed across ALL 8 sectors of real physical space!
+        for (let i = 0; i < REAL_SPACE_SPAWN_SECTORS.length; i++) {
           spawnMosquito(false, i);
         }
       } else if (stateRef.current.currentLevel === 2) {
-        // Initial wave of 8 mosquitoes for Level 2 dispersed across ALL 8 sectors of the bedroom!
-        for (let i = 0; i < BEDROOM_SPAWN_SECTORS.length; i++) {
+        // Initial wave of 8 mosquitoes for Level 2 dispersed across ALL 8 sectors of real physical space!
+        for (let i = 0; i < REAL_SPACE_SPAWN_SECTORS.length; i++) {
           spawnMosquito(false, i);
         }
       }
@@ -469,12 +442,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       camera.rotation.x = orientation.pitchRad;
       camera.rotation.z = orientation.rollRad;
 
-      // Camera 6DOF spatial translation in 3D room
+      // Camera 6DOF spatial translation in real room
       camera.position.set(position.x, position.y, position.z);
       camera.updateMatrixWorld();
-
-      // Toggle room visibility based on AR mode
-      roomGroup.visible = !isARModeRef.current;
 
       // Gameplay updates if active
       if (stateRef.current.isPlaying) {

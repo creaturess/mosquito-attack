@@ -55,12 +55,12 @@ export class SensorManager {
   private calibratedGamma: number = 0;
   private hasReceivedGyroData = false;
 
-  // Spatial Translation state (6DOF position tracking inside bedroom)
-  private readonly DEFAULT_X = 0.2;
+  // Spatial Translation state (6DOF position tracking in real environment)
+  private readonly DEFAULT_X = 0.0;
   private readonly DEFAULT_Y = 1.6; // Standing eye-level
-  private readonly DEFAULT_Z = 1.4; // Standing in open floor facing bed/desk
-  private position: SpatialPosition = { x: 0.2, y: 1.6, z: 1.4, forwardDistance: 0 };
-  private targetPosition: SpatialPosition = { x: 0.2, y: 1.6, z: 1.4, forwardDistance: 0 };
+  private readonly DEFAULT_Z = 0.0; // Origin in real room
+  private position: SpatialPosition = { x: 0.0, y: 1.6, z: 0.0, forwardDistance: 0 };
+  private targetPosition: SpatialPosition = { x: 0.0, y: 1.6, z: 0.0, forwardDistance: 0 };
   private linearVelocity = { x: 0, y: 0, z: 0 };
   private lastMotionTimestamp: number = 0;
 
@@ -81,16 +81,17 @@ export class SensorManager {
   // Camera video element for AR background
   private cameraStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
+  private currentFacingMode: 'environment' | 'user' = 'environment';
 
   // Smoothing factors: balanced for rock-solid 1:1 feel without jitter
   private readonly ROT_LERP = 0.16;
   private readonly POS_LERP = 0.22;
 
-  // Room spatial limits (inside bedroom walls)
-  private readonly LIMIT_X = 3.8;
-  private readonly LIMIT_Y_UP = 2.7;
-  private readonly LIMIT_Y_DOWN = 0.8;
-  private readonly LIMIT_Z = 3.6;
+  // Real room spatial movement limits (expanded for walking freely in real space)
+  private readonly LIMIT_X = 12.0;
+  private readonly LIMIT_Y_UP = 4.0;
+  private readonly LIMIT_Y_DOWN = 0.2;
+  private readonly LIMIT_Z = 12.0;
 
   constructor() {
     this.handleDeviceOrientation = this.handleDeviceOrientation.bind(this);
@@ -450,11 +451,20 @@ export class SensorManager {
   /**
    * Request and initialize Camera for AR passthrough
    */
-  public async requestCamera(): Promise<HTMLVideoElement | null> {
+  public async requestCamera(desiredFacingMode?: 'environment' | 'user'): Promise<HTMLVideoElement | null> {
+    if (desiredFacingMode) {
+      this.currentFacingMode = desiredFacingMode;
+    }
+    // Stop any existing stream before switching
+    if (this.cameraStream) {
+      this.cameraStream.getTracks().forEach((track) => track.stop());
+      this.cameraStream = null;
+    }
+
     try {
       this.cameraStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: 'environment' },
+          facingMode: { ideal: this.currentFacingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -478,10 +488,38 @@ export class SensorManager {
       return this.videoElement;
     } catch (err) {
       console.warn('Camera access denied or unavailable:', err);
-      this.status.cameraAllowed = false;
-      this.status.cameraActive = false;
-      return null;
+      // If environment camera failed, try any available video
+      try {
+        this.cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        if (!this.videoElement) {
+          this.videoElement = document.createElement('video');
+          this.videoElement.setAttribute('autoplay', '');
+          this.videoElement.setAttribute('muted', '');
+          this.videoElement.setAttribute('playsinline', '');
+          this.videoElement.style.display = 'none';
+          document.body.appendChild(this.videoElement);
+        }
+        this.videoElement.srcObject = this.cameraStream;
+        await this.videoElement.play();
+        this.status.cameraAllowed = true;
+        this.status.cameraActive = true;
+        return this.videoElement;
+      } catch (fallbackErr) {
+        console.warn('Fallback camera also failed:', fallbackErr);
+        this.status.cameraAllowed = false;
+        this.status.cameraActive = false;
+        return null;
+      }
     }
+  }
+
+  public async flipCamera(): Promise<HTMLVideoElement | null> {
+    const nextMode = this.currentFacingMode === 'environment' ? 'user' : 'environment';
+    return this.requestCamera(nextMode);
+  }
+
+  public getFacingMode(): 'environment' | 'user' {
+    return this.currentFacingMode;
   }
 
   public stopCamera() {

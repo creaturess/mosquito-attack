@@ -39,7 +39,7 @@ export default function App() {
     bossHealthPercent: 100,
     screamSecondsAccumulated: 0,
     isBossDead: false,
-    isARMode: false,
+    isARMode: true,
   });
 
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
@@ -192,22 +192,19 @@ export default function App() {
     }));
   }, []);
 
-  // Toggle AR mode
-  const handleToggleAR = async () => {
-    if (!gameState.isARMode) {
-      // Turn on AR
-      if (!videoElement) {
-        const vid = await sensorManager.requestCamera();
-        if (vid) {
-          setVideoElement(vid);
-          setGameState((prev) => ({ ...prev, isARMode: true }));
-        }
-      } else {
+  // Flip camera or reactivate camera in real environment mode
+  const handleToggleOrFlipCamera = async () => {
+    if (!videoElement) {
+      const vid = await sensorManager.requestCamera('environment');
+      if (vid) {
+        setVideoElement(vid);
         setGameState((prev) => ({ ...prev, isARMode: true }));
       }
     } else {
-      // Turn off AR
-      setGameState((prev) => ({ ...prev, isARMode: false }));
+      const vid = await sensorManager.flipCamera();
+      if (vid) {
+        setVideoElement(vid);
+      }
     }
   };
 
@@ -216,9 +213,9 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-full w-full select-none overflow-hidden bg-slate-950 font-sans">
-      {/* Background camera feed for AR Mode */}
-      {gameState.isARMode && videoElement && (
+    <div className="relative h-full w-full select-none overflow-hidden bg-black font-sans">
+      {/* Background Real-World Camera Feed */}
+      {videoElement && (
         <div ref={videoContainerRef} className="absolute inset-0 z-0 h-full w-full overflow-hidden">
           <video
             ref={(node) => {
@@ -232,7 +229,25 @@ export default function App() {
             muted
             className="h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-black/25 pointer-events-none" />
+        </div>
+      )}
+
+      {/* Fallback Viewport if camera is not yet connected */}
+      {!videoElement && (
+        <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-radial from-slate-900 to-black p-6 text-center">
+          <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl border border-rose-500/30 bg-slate-900/90 shadow-2xl">
+            <span className="text-4xl animate-pulse">📷</span>
+          </div>
+          <h3 className="mt-4 text-lg font-bold text-white">Entorno Real (Cámara en Vivo)</h3>
+          <p className="mt-1 max-w-xs text-xs text-slate-300">
+            Los mosquitos están en tu habitación real. Conecta la cámara para ver tu entorno físico.
+          </p>
+          <button
+            onClick={handleToggleOrFlipCamera}
+            className="mt-4 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-rose-600/30 transition hover:from-rose-500 active:scale-95"
+          >
+            Activar Cámara en Vivo
+          </button>
         </div>
       )}
 
@@ -256,7 +271,7 @@ export default function App() {
         sensorStatus={sensorStatus}
         currentVolume={currentVolume}
         isScreaming={isScreaming}
-        onToggleAR={handleToggleAR}
+        onToggleAR={handleToggleOrFlipCamera}
         onCalibrateGyro={handleCalibrateGyro}
         forwardDistance={forwardDistance}
       />
