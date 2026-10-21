@@ -151,6 +151,9 @@ export class SensorManager {
     this.initialAlphaOffset = this.rawOrientation.alpha;
     this.calibratedBeta = this.rawOrientation.beta !== undefined ? this.rawOrientation.beta : 65;
     this.calibratedGamma = this.rawOrientation.gamma !== undefined ? this.rawOrientation.gamma : 0;
+    this.gravityFilter = { x: 0, y: 9.8, z: 0 };
+    this.stepCount = 0;
+    this.physicalSpeedMps = 0;
     this.manualEuler.yaw = 0;
     this.manualEuler.pitch = 0;
     this.resetPosition();
@@ -179,9 +182,18 @@ export class SensorManager {
     }
   }
 
+  // Physical motion tracking
+  private gravityFilter = { x: 0, y: 9.8, z: 0 };
+  private lastStepTimestamp: number = 0;
+  private prevMag: number = 0;
+  private isStepPeaking: boolean = false;
+  public stepCount: number = 0;
+  public physicalSpeedMps: number = 0;
+
   /**
-   * DeviceMotion handler: calculates physical forward, backward, and lateral acceleration
-   * when the user intentionally pushes/retreats the phone in physical space.
+   * DeviceMotion handler: calculates physical forward, backward, and lateral displacement
+   * when the user physically moves the phone, steps, or pushes/pulls in physical space.
+   * Proportional and natural ("a la par con el movimiento del celular").
    */
   private handleDeviceMotion(event: DeviceMotionEvent) {
     this.status.motionActive = true;
@@ -189,41 +201,106 @@ export class SensorManager {
     const dt = this.lastMotionTimestamp > 0 ? Math.min((now - this.lastMotionTimestamp) / 1000, 0.08) : 0.016;
     this.lastMotionTimestamp = now;
 
-    // Prefer linear acceleration (without gravity)
-    const acc = event.acceleration || event.accelerationIncludingGravity;
-    if (!acc) return;
+    // 1. Extract linear acceleration without gravity
+    let lx = 0;
+    let ly = 0;
+    let lz = 0;
 
-    const rawX = acc.x ?? 0;
-    const rawY = acc.y ?? 0;
-    const rawZ = acc.z ?? 0;
+    const rawLin = event.acceleration;
+    if (
+      rawLin &&
+      rawLin.x !== null &&
+      rawLin.y !== null &&
+      rawLin.z !== null &&
+      (rawLin.x !== 0 || rawLin.y !== 0 || rawLin.z !== 0)
+    ) {
+      lx = rawLin.x;
+      ly = rawLin.y;
+      lz = rawLin.z;
+    } else {
+      // Fallback to high-pass filtered accelerationIncludingGravity
+      const rawGrav = event.accelerationIncludingGravity;
+      if (rawGrav && rawGrav.x !== null && rawGrav.y !== null && rawGrav.z !== null) {
+        const alpha = 0.86;
+        this.gravityFilter.x = alpha * this.gravityFilter.x + (1 - alpha) * rawGrav.x;
+        this.gravityFilter.y = alpha * this.gravityFilter.y + (1 - alpha) * rawGrav.y;
+        this.gravityFilter.z = alpha * this.gravityFilter.z + (1 - alpha) * rawGrav.z;
 
-    // Deadband threshold to eliminate sensor noise / tremor without blocking deliberate pushes
-    const deadband = 0.38;
-    const fx = Math.abs(rawX) > deadband ? (rawX - Math.sign(rawX) * deadband) : 0;
-    const fy = Math.abs(rawY) > deadband ? (rawY - Math.sign(rawY) * deadband) : 0;
-    const fz = Math.abs(rawZ) > deadband ? (rawZ - Math.sign(rawZ) * deadband) : 0;
-
-    if (fx === 0 && fy === 0 && fz === 0) {
-      // Fast decay when no intentional motion
-      this.linearVelocity.x *= 0.65;
-      this.linearVelocity.z *= 0.65;
-      return;
+        lx = rawGrav.x - this.gravityFilter.x;
+        ly = rawGrav.y - this.gravityFilter.y;
+        lz = rawGrav.z - this.gravityFilter.z;
+      }
     }
 
-    // In mobile phone coordinates:
-    // Pushing phone forward: negative Z or slight positive Y
-    const forwardThrust = (-fz * 0.7 + fy * 0.3) * this.motionSensitivity;
-    const strafeThrust = fx * this.motionSensitivity * 0.5;
+    // 2. Physical projection based on current phone pitch tilt
+    // Player holds phone tilted back by ~45-75 deg. Forward in world is along camera horizontal gaze.
+    const pitchRad = ((this.smoothedOrientation.beta || 60) * Math.PI) / 180;
+    const cosPitch = Math.cos(pitchRad);
+    const sinPitch = Math.sin(pitchRad);
 
-    // Integrate forward/backward velocity with strong friction damping
-    this.linearVelocity.z += forwardThrust * dt * 1.5;
-    this.linearVelocity.x += strafeThrust * dt * 1.2;
+    // Forward/backward thrust in phone orientation:
+    // -lz pushes forward into space; +ly projects forward when phone is tilted back
+    const rawForwardAcc = -lz * sinPitch + ly * cosPitch;
+    const rawStrafeAcc = lx;
 
-    // Strong damping prevents floating/skating
-    this.linearVelocity.z *= 0.72;
-    this.linearVelocity.x *= 0.72;
+    // 3. Pedometer step detection:
+    // When walking while holding phone, steps create vertical/forward impulse peaks (1.1 - 2.8 m/s²)
+    const netMag = Math.sqrt(lx * lx + ly * ly + lz * lz);
+    if (netMag > 1.25 && netMag > this.prevMag) {
+      this.isStepPeaking = true;
+    } else if (this.isStepPeaking && netMag < this.prevMag) {
+      this.isStepPeaking = false;
+      const timeSinceLastStep = now - this.lastStepTimestamp;
+      if (timeSinceLastStep >= 280 && timeSinceLastStep <= 1100 && this.prevMag >= 1.25) {
+        this.lastStepTimestamp = now;
+        this.stepCount++;
 
-    // Add translation along current orientation
+        // Stride displacement: proportional step forward or backward
+        const isRetreating = rawForwardAcc < -0.3;
+        const strideMeters = (isRetreating ? -0.38 : 0.44) * this.motionSensitivity;
+        this.moveForward(strideMeters);
+        this.triggerHaptic('step');
+      }
+    }
+    this.prevMag = netMag;
+
+    // 4. Continuous physical thrust integration (pushing / pulling phone in air)
+    // Soft-knee deadband to reject hand micro-tremors without sacrificing responsiveness
+    const deadband = 0.22;
+    const applyDeadband = (val: number): number => {
+      const abs = Math.abs(val);
+      if (abs < deadband) return 0;
+      return Math.sign(val) * (abs - deadband);
+    };
+
+    const accFwd = applyDeadband(rawForwardAcc);
+    const accStrafe = applyDeadband(rawStrafeAcc);
+
+    // Integrate into velocity with calibrated gain
+    const thrustGain = 2.6 * this.motionSensitivity;
+    if (accFwd !== 0) {
+      this.linearVelocity.z += accFwd * dt * thrustGain;
+    }
+    if (accStrafe !== 0) {
+      this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.7);
+    }
+
+    // Natural friction damping: smooth halt when phone stops moving
+    const drag = 3.8;
+    const friction = Math.exp(-drag * dt);
+    this.linearVelocity.z *= friction;
+    this.linearVelocity.x *= friction;
+
+    // Prevent micro-creeping
+    if (Math.abs(this.linearVelocity.z) < 0.015) this.linearVelocity.z = 0;
+    if (Math.abs(this.linearVelocity.x) < 0.015) this.linearVelocity.x = 0;
+
+    // Clamp maximum physical translation speed
+    const maxSpeed = 1.8 * this.motionSensitivity;
+    this.linearVelocity.z = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.z));
+    this.linearVelocity.x = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.x));
+
+    // 5. Apply displacement in 3D bedroom along camera's current gaze yaw
     const yaw = this.getYawRad();
     const forwardDirX = -Math.sin(yaw);
     const forwardDirZ = -Math.cos(yaw);
@@ -232,11 +309,15 @@ export class SensorManager {
 
     const deltaDistZ = this.linearVelocity.z * dt;
     const deltaDistX = this.linearVelocity.x * dt;
-    this.targetPosition.x += forwardDirX * deltaDistZ + rightDirX * deltaDistX;
-    this.targetPosition.z += forwardDirZ * deltaDistZ + rightDirZ * deltaDistX;
-    this.targetPosition.forwardDistance += deltaDistZ;
 
-    this.clampTargetPosition();
+    if (deltaDistZ !== 0 || deltaDistX !== 0) {
+      this.targetPosition.x += forwardDirX * deltaDistZ + rightDirX * deltaDistX;
+      this.targetPosition.z += forwardDirZ * deltaDistZ + rightDirZ * deltaDistX;
+      this.targetPosition.forwardDistance += deltaDistZ;
+      this.clampTargetPosition();
+    }
+
+    this.physicalSpeedMps = Math.hypot(this.linearVelocity.z, this.linearVelocity.x);
   }
 
   public getYawRad(): number {
@@ -452,19 +533,21 @@ export class SensorManager {
       const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
       rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
 
-      // Optional tilt assist only on deliberate extreme tilt
-      if (this.tiltAssistEnabled) {
-        const betaDiff = this.smoothedOrientation.beta - this.calibratedBeta;
-        if (Math.abs(betaDiff) > 20) {
-          const tiltThrust = Math.sign(betaDiff) * Math.min(0.6, (Math.abs(betaDiff) - 20) * 0.02);
-          const forwardDirX = -Math.sin(yawRad);
-          const forwardDirZ = -Math.cos(yawRad);
+      // 2. Natural physical lean forward / backward:
+      // When the user tilts/leans the phone forward beyond resting angle (+12 deg), advance forward.
+      // When tilted backward (-12 deg), retreat backward smoothly.
+      const betaDiff = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
+      if (Math.abs(betaDiff) > 12) {
+        const leanFactor = Math.sign(betaDiff) * Math.min(1.3, (Math.abs(betaDiff) - 12) * 0.035) * this.motionSensitivity;
+        const forwardDirX = -Math.sin(yawRad);
+        const forwardDirZ = -Math.cos(yawRad);
+        const dtFrame = 0.016;
+        const leanDisp = leanFactor * dtFrame;
 
-          this.targetPosition.x += forwardDirX * tiltThrust * 0.02;
-          this.targetPosition.z += forwardDirZ * tiltThrust * 0.02;
-          this.targetPosition.forwardDistance += tiltThrust * 0.02;
-          this.clampTargetPosition();
-        }
+        this.targetPosition.x += forwardDirX * leanDisp;
+        this.targetPosition.z += forwardDirZ * leanDisp;
+        this.targetPosition.forwardDistance += leanDisp;
+        this.clampTargetPosition();
       }
     } else {
       yawRad = this.manualEuler.yaw;
@@ -521,6 +604,41 @@ export class SensorManager {
       position: { ...this.position },
       audio: this.audioMetrics,
       status: { ...this.status },
+    };
+  }
+
+  /**
+   * Returns a snapshot of the current sensor state and spatial position without advancing lerp interpolation
+   */
+  public getSnapshot(): {
+    orientation: { alpha: number; beta: number; gamma: number; yawRad: number; pitchRad: number; rollRad: number };
+    position: SpatialPosition;
+    audio: AudioMetrics;
+    status: SensorStatus;
+    stepCount: number;
+    speed: number;
+  } {
+    const degToRad = Math.PI / 180;
+    const yawRad = this.getYawRad();
+    const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
+    const pitchRad = Math.max(-1.42, Math.min(1.42, deltaBeta * degToRad + this.manualEuler.pitch));
+    const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
+    const rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
+
+    return {
+      orientation: {
+        alpha: this.smoothedOrientation.alpha,
+        beta: this.smoothedOrientation.beta,
+        gamma: this.smoothedOrientation.gamma,
+        yawRad,
+        pitchRad,
+        rollRad,
+      },
+      position: { ...this.position },
+      audio: { ...this.audioMetrics },
+      status: { ...this.status },
+      stepCount: this.stepCount,
+      speed: this.physicalSpeedMps,
     };
   }
 

@@ -58,9 +58,9 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
   const handleSetSensitivity = (mode: 'normal' | 'high' | 'ultra') => {
     setSensitivityMode(mode);
-    if (mode === 'normal') sensorManager.motionSensitivity = 1.2;
-    if (mode === 'high') sensorManager.motionSensitivity = 2.0;
-    if (mode === 'ultra') sensorManager.motionSensitivity = 3.0;
+    if (mode === 'normal') sensorManager.motionSensitivity = 1.0;
+    if (mode === 'high') sensorManager.motionSensitivity = 1.6;
+    if (mode === 'ultra') sensorManager.motionSensitivity = 2.2;
   };
 
   // Screen click/tap slap visual feedback
@@ -184,7 +184,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                       sensitivityMode === mode ? 'bg-rose-600 text-white' : 'text-slate-300 hover:bg-slate-800'
                     }`}
                   >
-                    {mode === 'normal' ? 'Normal (1.6x)' : mode === 'high' ? 'Alta (2.6x)' : 'Ultra (3.8x)'}
+                    {mode === 'normal' ? 'Normal (Fiel 1.0x)' : mode === 'high' ? 'Ágil (1.6x)' : 'Dinámico (2.2x)'}
                   </button>
                 ))}
               </div>
@@ -319,18 +319,18 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               title="Re-centrar orientación y posición al origen"
             >
               <RotateCcw className="h-4 w-4 text-cyan-400" />
-              <span>Centrar Giroscopio</span>
+              <span>Centrar Posición</span>
             </button>
           </div>
         </div>
 
         {/* Dynamic Tip */}
-        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-none mx-auto max-w-lg">
+        <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-4 py-1.5 text-center text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-none mx-auto max-w-xl">
           <span className="text-cyan-400 font-semibold flex items-center gap-1">
-            🕹️ Usa el mando táctil para moverte • Gira el celular para apuntar
+            📱 Camina, da pasos o inclina el celular para avanzar/retroceder • 🕹️ Mando táctil opcional
           </span>
           <span className="text-slate-500 hidden sm:inline">•</span>
-          <span className="text-slate-300 hidden sm:inline">🎧 Sigue el zumbido 3D y aplasta tocando la pantalla</span>
+          <span className="text-slate-300 hidden sm:inline">🎧 Sigue el zumbido 3D y aplasta al tocar</span>
         </div>
       </footer>
     </div>

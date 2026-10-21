@@ -68,9 +68,9 @@ export default function App() {
     const checkSensors = () => {
       animId = requestAnimationFrame(checkSensors);
       frameCounter++;
-      // Poll at ~20Hz for UI HUD smoothness
+      // Poll at ~20Hz for UI HUD smoothness without advancing animation lerp
       if (frameCounter % 3 === 0) {
-        const { audio, status, position } = sensorManager.update();
+        const { audio, status, position } = sensorManager.getSnapshot();
         setCurrentVolume(audio.volume);
         setIsScreaming(audio.isScreaming);
         setSensorStatus(status);
