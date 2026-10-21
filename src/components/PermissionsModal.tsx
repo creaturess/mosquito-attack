@@ -10,29 +10,26 @@ import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
 interface PermissionsModalProps {
-  onPermissionsCompleted: (videoEl: HTMLVideoElement | null) => void;
+  onPermissionsCompleted: (stream: MediaStream | null) => void;
 }
 
 export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermissionsCompleted }) => {
+  const existingStream = sensorManager.getCameraStream();
   const [step, setStep] = useState<'welcome' | 'permissions'>('welcome');
   const [gyroState, setGyroState] = useState<'pending' | 'granted' | 'denied'>('pending');
   const [micState, setMicState] = useState<'pending' | 'granted' | 'denied'>('pending');
-  const [cameraState, setCameraState] = useState<'pending' | 'granted' | 'denied'>('pending');
+  const [cameraState, setCameraState] = useState<'pending' | 'granted' | 'denied'>(
+    existingStream && existingStream.active ? 'granted' : 'pending'
+  );
   const [isRequesting, setIsRequesting] = useState(false);
-
-  const handleStartExperience = () => {
-    // Initialize Web Audio Context on user gesture
-    buzzManager.init();
-    setStep('permissions');
-  };
 
   const handleAuthorizeAll = async () => {
     setIsRequesting(true);
 
-    // 1. AudioContext
+    // 1. AudioContext on user gesture
     const audioCtx = buzzManager.init();
 
-    // 2. Gyroscope
+    // 2. Gyroscope & Accelerometer
     try {
       const gyroOk = await sensorManager.requestGyroscope();
       setGyroState(gyroOk ? 'granted' : 'denied');
@@ -48,23 +45,28 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
       setMicState('denied');
     }
 
-    // 4. Optional Camera
-    let videoEl: HTMLVideoElement | null = null;
+    // 4. Rear Camera (strictly back camera)
+    let stream: MediaStream | null = null;
     try {
-      videoEl = await sensorManager.requestCamera();
-      setCameraState(videoEl ? 'granted' : 'denied');
+      stream = await sensorManager.requestRearCamera();
+      setCameraState(stream ? 'granted' : 'denied');
     } catch {
       setCameraState('denied');
     }
 
     setIsRequesting(false);
     setTimeout(() => {
-      onPermissionsCompleted(videoEl);
-    }, 400);
+      onPermissionsCompleted(stream || sensorManager.getCameraStream());
+    }, 350);
+  };
+
+  const handleStartExperience = () => {
+    // Directly authorize all on this initial user gesture for zero friction
+    handleAuthorizeAll();
   };
 
   const handleSkipOrContinue = () => {
-    onPermissionsCompleted(null);
+    onPermissionsCompleted(sensorManager.getCameraStream());
   };
 
   return (

@@ -78,10 +78,9 @@ export class SensorManager {
   private audioMetrics: AudioMetrics = { volume: 0, bassLevel: 0, isScreaming: false };
   public screamThreshold: number = 0.62;
 
-  // Camera video element for AR background
+  // Camera video stream for AR background (strictly rear / environment camera)
   private cameraStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
-  private currentFacingMode: 'environment' | 'user' = 'environment';
 
   // Smoothing factors: balanced for rock-solid 1:1 feel without jitter
   private readonly ROT_LERP = 0.16;
@@ -449,77 +448,105 @@ export class SensorManager {
   }
 
   /**
-   * Request and initialize Camera for AR passthrough
+   * Request and initialize Rear Camera strictly (environment / back camera)
    */
-  public async requestCamera(desiredFacingMode?: 'environment' | 'user'): Promise<HTMLVideoElement | null> {
-    if (desiredFacingMode) {
-      this.currentFacingMode = desiredFacingMode;
+  public async requestRearCamera(): Promise<MediaStream | null> {
+    // If stream is already active and healthy, reuse it to avoid video flicker
+    if (this.cameraStream && this.cameraStream.active) {
+      const videoTracks = this.cameraStream.getVideoTracks();
+      if (videoTracks.length > 0 && videoTracks[0].readyState === 'live') {
+        this.status.cameraAllowed = true;
+        this.status.cameraActive = true;
+        return this.cameraStream;
+      }
     }
-    // Stop any existing stream before switching
+
+    // Stop any stale tracks
     if (this.cameraStream) {
       this.cameraStream.getTracks().forEach((track) => track.stop());
       this.cameraStream = null;
     }
 
     try {
+      // 1. Primary preference: strictly rear camera with high-definition resolution
       this.cameraStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: this.currentFacingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
 
-      if (!this.videoElement) {
-        this.videoElement = document.createElement('video');
-        this.videoElement.setAttribute('autoplay', '');
-        this.videoElement.setAttribute('muted', '');
-        this.videoElement.setAttribute('playsinline', '');
-        this.videoElement.style.display = 'none';
-        document.body.appendChild(this.videoElement);
-      }
-
-      this.videoElement.srcObject = this.cameraStream;
-      await this.videoElement.play();
-
       this.status.cameraAllowed = true;
       this.status.cameraActive = true;
-      return this.videoElement;
+      return this.cameraStream;
     } catch (err) {
-      console.warn('Camera access denied or unavailable:', err);
-      // If environment camera failed, try any available video
+      console.warn('Initial rear camera request error, trying simplified environment constraints:', err);
       try {
-        this.cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        if (!this.videoElement) {
-          this.videoElement = document.createElement('video');
-          this.videoElement.setAttribute('autoplay', '');
-          this.videoElement.setAttribute('muted', '');
-          this.videoElement.setAttribute('playsinline', '');
-          this.videoElement.style.display = 'none';
-          document.body.appendChild(this.videoElement);
-        }
-        this.videoElement.srcObject = this.cameraStream;
-        await this.videoElement.play();
+        // 2. Fallback: simplified environment facingMode
+        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+
         this.status.cameraAllowed = true;
         this.status.cameraActive = true;
-        return this.videoElement;
+        return this.cameraStream;
       } catch (fallbackErr) {
-        console.warn('Fallback camera also failed:', fallbackErr);
-        this.status.cameraAllowed = false;
-        this.status.cameraActive = false;
-        return null;
+        console.warn('Fallback environment camera also failed, trying basic video:', fallbackErr);
+        try {
+          this.cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+
+          this.status.cameraAllowed = true;
+          this.status.cameraActive = true;
+          return this.cameraStream;
+        } catch (finalErr) {
+          console.warn('All camera attempts failed or denied:', finalErr);
+          this.status.cameraAllowed = false;
+          this.status.cameraActive = false;
+          return null;
+        }
       }
     }
   }
 
-  public async flipCamera(): Promise<HTMLVideoElement | null> {
-    const nextMode = this.currentFacingMode === 'environment' ? 'user' : 'environment';
-    return this.requestCamera(nextMode);
+  /**
+   * Request camera and return an HTMLVideoElement (strictly rear camera)
+   */
+  public async requestCamera(): Promise<HTMLVideoElement | null> {
+    const stream = await this.requestRearCamera();
+    if (!stream) return null;
+
+    if (!this.videoElement) {
+      this.videoElement = document.createElement('video');
+      this.videoElement.setAttribute('autoplay', '');
+      this.videoElement.setAttribute('muted', '');
+      this.videoElement.setAttribute('playsinline', '');
+      this.videoElement.setAttribute('webkit-playsinline', '');
+      this.videoElement.style.position = 'fixed';
+      this.videoElement.style.top = '0';
+      this.videoElement.style.left = '0';
+      this.videoElement.style.width = '100%';
+      this.videoElement.style.height = '100%';
+      this.videoElement.style.objectFit = 'cover';
+      this.videoElement.style.pointerEvents = 'none';
+      this.videoElement.style.zIndex = '-1';
+    }
+
+    if (this.videoElement.srcObject !== stream) {
+      this.videoElement.srcObject = stream;
+      await this.videoElement.play().catch(() => {});
+    }
+
+    return this.videoElement;
   }
 
-  public getFacingMode(): 'environment' | 'user' {
-    return this.currentFacingMode;
+  public getCameraStream(): MediaStream | null {
+    return this.cameraStream;
   }
 
   public stopCamera() {

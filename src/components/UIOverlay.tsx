@@ -9,7 +9,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Mic,
   MicOff,
-  Camera,
   Volume2,
   VolumeX,
   Clock,
@@ -31,7 +30,6 @@ interface UIOverlayProps {
   sensorStatus: SensorStatus;
   currentVolume: number;
   isScreaming: boolean;
-  onToggleAR: () => void;
   onCalibrateGyro: () => void;
   forwardDistance?: number;
 }
@@ -41,7 +39,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   sensorStatus,
   currentVolume,
   isScreaming,
-  onToggleAR,
   onCalibrateGyro,
   forwardDistance = 0,
 }) => {
@@ -190,15 +187,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             )}
           </div>
-
-          <button
-            onClick={onToggleAR}
-            title="Cambiar o activar cámara trasera / frontal"
-            className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 transition active:scale-95 shadow-md"
-          >
-            <Camera className="h-3.5 w-3.5 text-rose-400" />
-            <span>Cámara en Vivo</span>
-          </button>
 
           <button
             onClick={toggleMute}

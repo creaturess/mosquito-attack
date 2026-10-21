@@ -55,9 +55,9 @@ export default function App() {
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isScreaming, setIsScreaming] = useState(false);
   const [forwardDistance, setForwardDistance] = useState(0);
-  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(() => sensorManager.getCameraStream());
 
-  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const timerIntervalRef = useRef<number | null>(null);
 
   // Poll sensor volume, spatial position and status for UI HUD
@@ -81,6 +81,40 @@ export default function App() {
     animId = requestAnimationFrame(checkSensors);
     return () => cancelAnimationFrame(animId);
   }, []);
+
+  // Auto-activate rear camera immediately when the app opens
+  useEffect(() => {
+    let isMounted = true;
+    const initAutoCamera = async () => {
+      try {
+        const stream = await sensorManager.requestRearCamera();
+        if (stream && isMounted) {
+          setCameraStream(stream);
+        }
+      } catch (err) {
+        console.warn('Auto-camera initial trigger:', err);
+      }
+    };
+    initAutoCamera();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Bind cameraStream to persistent video element once without flickering or re-renders
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (cameraStream) {
+      if (video.srcObject !== cameraStream) {
+        video.srcObject = cameraStream;
+        video.play().catch(() => {});
+      }
+    } else {
+      video.srcObject = null;
+    }
+  }, [cameraStream]);
 
   // Countdown timer effect
   useEffect(() => {
@@ -118,10 +152,10 @@ export default function App() {
   };
 
   // Called when user finishes permissions setup
-  const handlePermissionsCompleted = (videoEl: HTMLVideoElement | null) => {
+  const handlePermissionsCompleted = (stream: MediaStream | null) => {
     setShowPermissionsModal(false);
-    if (videoEl) {
-      setVideoElement(videoEl);
+    if (stream) {
+      setCameraStream(stream);
     }
     // Show Level 1 briefing
     setActiveModal('level_start');
@@ -192,62 +226,39 @@ export default function App() {
     }));
   }, []);
 
-  // Flip camera or reactivate camera in real environment mode
-  const handleToggleOrFlipCamera = async () => {
-    if (!videoElement) {
-      const vid = await sensorManager.requestCamera('environment');
-      if (vid) {
-        setVideoElement(vid);
-        setGameState((prev) => ({ ...prev, isARMode: true }));
-      }
-    } else {
-      const vid = await sensorManager.flipCamera();
-      if (vid) {
-        setVideoElement(vid);
-      }
-    }
-  };
-
   const handleCalibrateGyro = () => {
     sensorManager.calibrateCenter();
   };
 
   return (
     <div className="relative h-full w-full select-none overflow-hidden bg-black font-sans">
-      {/* Background Real-World Camera Feed */}
-      {videoElement && (
-        <div ref={videoContainerRef} className="absolute inset-0 z-0 h-full w-full overflow-hidden">
-          <video
-            ref={(node) => {
-              if (node && videoElement.srcObject) {
-                node.srcObject = videoElement.srcObject;
-                node.play().catch(() => {});
-              }
-            }}
-            autoPlay
-            playsInline
-            muted
-            className="h-full w-full object-cover"
-          />
-        </div>
-      )}
+      {/* Background Real-World Camera Feed: Hardware accelerated, persistent, back-camera only, zero flicker */}
+      <div className="absolute inset-0 z-0 h-full w-full overflow-hidden bg-black pointer-events-none">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`h-full w-full object-cover transition-opacity duration-500 pointer-events-none ${
+            cameraStream ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{
+            transform: 'translateZ(0)',
+            backfaceVisibility: 'hidden',
+          }}
+        />
+      </div>
 
-      {/* Fallback Viewport if camera is not yet connected */}
-      {!videoElement && (
-        <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-radial from-slate-900 to-black p-6 text-center">
+      {/* Fallback Viewport if camera permission is connecting or not yet granted */}
+      {!cameraStream && (
+        <div className="absolute inset-0 z-0 flex flex-col items-center justify-center bg-radial from-slate-900 to-black p-6 text-center pointer-events-none">
           <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl border border-rose-500/30 bg-slate-900/90 shadow-2xl">
             <span className="text-4xl animate-pulse">📷</span>
           </div>
-          <h3 className="mt-4 text-lg font-bold text-white">Entorno Real (Cámara en Vivo)</h3>
+          <h3 className="mt-4 text-lg font-bold text-white">Cámara Trasera (Entorno Real)</h3>
           <p className="mt-1 max-w-xs text-xs text-slate-300">
-            Los mosquitos están en tu habitación real. Conecta la cámara para ver tu entorno físico.
+            Conectando cámara para proyectar los mosquitos en tu habitación física...
           </p>
-          <button
-            onClick={handleToggleOrFlipCamera}
-            className="mt-4 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-rose-600/30 transition hover:from-rose-500 active:scale-95"
-          >
-            Activar Cámara en Vivo
-          </button>
         </div>
       )}
 
@@ -262,7 +273,7 @@ export default function App() {
         }}
         onScreamProgress={handleScreamProgress}
         isARMode={gameState.isARMode}
-        videoElement={videoElement}
+        videoElement={null}
       />
 
       {/* HUD & Sensor Overlay */}
@@ -271,7 +282,6 @@ export default function App() {
         sensorStatus={sensorStatus}
         currentVolume={currentVolume}
         isScreaming={isScreaming}
-        onToggleAR={handleToggleOrFlipCamera}
         onCalibrateGyro={handleCalibrateGyro}
         forwardDistance={forwardDistance}
       />
