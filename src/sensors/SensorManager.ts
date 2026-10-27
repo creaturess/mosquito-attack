@@ -412,15 +412,36 @@ export class SensorManager {
   /**
    * Request Microphone permission and set up AnalyserNode
    */
+  /**
+   * Request Microphone permission and set up AnalyserNode
+   */
   public async requestMicrophone(audioCtx?: AudioContext): Promise<boolean> {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      console.warn('Microphone not supported in this browser/context');
+      this.status.micAllowed = false;
+      this.status.micActive = false;
+      return false;
+    }
+
     try {
-      this.audioStream = await navigator.mediaDevices.getUserMedia({
+      const micPromise = navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
         },
       });
+
+      // Strict 3.5s timeout so mobile browsers never hang indefinitely
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+      const stream = await Promise.race([micPromise, timeoutPromise]);
+
+      if (!stream) {
+        console.warn('Microphone request timed out or cancelled');
+        return false;
+      }
+
+      this.audioStream = stream;
 
       const ctx = audioCtx || new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       if (ctx.state === 'suspended') {
@@ -451,6 +472,13 @@ export class SensorManager {
    * Request and initialize Rear Camera strictly (environment / back camera)
    */
   public async requestRearCamera(): Promise<MediaStream | null> {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      console.warn('Camera not supported in this browser/context');
+      this.status.cameraAllowed = false;
+      this.status.cameraActive = false;
+      return null;
+    }
+
     // If stream is already active and healthy, reuse it to avoid video flicker
     if (this.cameraStream && this.cameraStream.active) {
       const videoTracks = this.cameraStream.getVideoTracks();
@@ -468,8 +496,8 @@ export class SensorManager {
     }
 
     try {
-      // 1. Primary preference: strictly rear camera with high-definition resolution
-      this.cameraStream = await navigator.mediaDevices.getUserMedia({
+      // 1. Primary preference: rear camera with timeout protection
+      const camPromise = navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
@@ -478,32 +506,53 @@ export class SensorManager {
         audio: false,
       });
 
-      this.status.cameraAllowed = true;
-      this.status.cameraActive = true;
-      return this.cameraStream;
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const res = await Promise.race([camPromise, timeoutPromise]);
+
+      if (res) {
+        this.cameraStream = res;
+        this.status.cameraAllowed = true;
+        this.status.cameraActive = true;
+        return this.cameraStream;
+      }
+      throw new Error('Camera primary request timeout');
     } catch (err) {
       console.warn('Initial rear camera request error, trying simplified environment constraints:', err);
       try {
         // 2. Fallback: simplified environment facingMode
-        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+        const fallbackPromise = navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' },
           audio: false,
         });
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+        const res = await Promise.race([fallbackPromise, timeoutPromise]);
 
-        this.status.cameraAllowed = true;
-        this.status.cameraActive = true;
-        return this.cameraStream;
-      } catch (fallbackErr) {
-        console.warn('Fallback environment camera also failed, trying basic video:', fallbackErr);
-        try {
-          this.cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false,
-          });
-
+        if (res) {
+          this.cameraStream = res;
           this.status.cameraAllowed = true;
           this.status.cameraActive = true;
           return this.cameraStream;
+        }
+        throw new Error('Camera fallback request timeout');
+      } catch (fallbackErr) {
+        console.warn('Fallback environment camera also failed, trying basic video:', fallbackErr);
+        try {
+          const basicPromise = navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+          const res = await Promise.race([basicPromise, timeoutPromise]);
+
+          if (res) {
+            this.cameraStream = res;
+            this.status.cameraAllowed = true;
+            this.status.cameraActive = true;
+            return this.cameraStream;
+          }
+          this.status.cameraAllowed = false;
+          this.status.cameraActive = false;
+          return null;
         } catch (finalErr) {
           console.warn('All camera attempts failed or denied:', finalErr);
           this.status.cameraAllowed = false;

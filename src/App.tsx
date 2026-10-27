@@ -92,24 +92,7 @@ export default function App() {
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Auto-activate rear camera immediately when the app opens
-  useEffect(() => {
-    let isMounted = true;
-    const initAutoCamera = async () => {
-      try {
-        const stream = await sensorManager.requestRearCamera();
-        if (stream && isMounted) {
-          setCameraStream(stream);
-        }
-      } catch (err) {
-        console.warn('Auto-camera initial trigger:', err);
-      }
-    };
-    initAutoCamera();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+
 
   // Bind cameraStream to persistent video element once without flickering or re-renders
   useEffect(() => {
@@ -166,6 +149,10 @@ export default function App() {
     setShowPermissionsModal(false);
     if (stream) {
       setCameraStream(stream);
+      setGameState((prev) => ({ ...prev, isARMode: true }));
+    } else {
+      setCameraStream(null);
+      setGameState((prev) => ({ ...prev, isARMode: false }));
     }
     // Show Level 1 briefing
     setActiveModal('level_start');
@@ -242,8 +229,8 @@ export default function App() {
 
   return (
     <div className="relative h-full w-full select-none overflow-hidden bg-black font-sans">
-      {/* Background Real-World Camera Feed: Hardware accelerated, persistent, back-camera only, zero flicker */}
-      <div className="absolute inset-0 z-0 h-full w-full overflow-hidden bg-black pointer-events-none">
+      {/* Background Real-World Camera Feed or Atmospheric Backdrop */}
+      <div className="absolute inset-0 z-0 h-full w-full overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-black pointer-events-none">
         <video
           ref={videoRef}
           autoPlay
