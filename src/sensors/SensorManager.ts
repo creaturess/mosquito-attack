@@ -86,11 +86,11 @@ export class SensorManager {
   private readonly ROT_LERP = 0.16;
   private readonly POS_LERP = 0.22;
 
-  // Real room spatial movement limits (expanded for walking freely in real space)
-  private readonly LIMIT_X = 12.0;
-  private readonly LIMIT_Y_UP = 4.0;
-  private readonly LIMIT_Y_DOWN = 0.2;
-  private readonly LIMIT_Z = 12.0;
+  // Real room spatial movement limits (calibrated to the 1.85x bedroom scale)
+  private readonly LIMIT_X = 8.1;
+  private readonly LIMIT_Y_UP = 3.2;
+  private readonly LIMIT_Y_DOWN = 0.8;
+  private readonly LIMIT_Z = 7.5;
 
   constructor() {
     this.handleDeviceOrientation = this.handleDeviceOrientation.bind(this);
@@ -244,20 +244,20 @@ export class SensorManager {
     const rawStrafeAcc = lx;
 
     // 3. Pedometer step detection:
-    // When walking while holding phone, steps create vertical/forward impulse peaks (1.1 - 2.8 m/s²)
+    // When physically walking while holding phone, steps create impulse peaks
     const netMag = Math.sqrt(lx * lx + ly * ly + lz * lz);
-    if (netMag > 1.25 && netMag > this.prevMag) {
+    if (netMag > 0.85 && netMag > this.prevMag) {
       this.isStepPeaking = true;
     } else if (this.isStepPeaking && netMag < this.prevMag) {
       this.isStepPeaking = false;
       const timeSinceLastStep = now - this.lastStepTimestamp;
-      if (timeSinceLastStep >= 280 && timeSinceLastStep <= 1100 && this.prevMag >= 1.25) {
+      if (timeSinceLastStep >= 240 && timeSinceLastStep <= 1200 && this.prevMag >= 0.85) {
         this.lastStepTimestamp = now;
         this.stepCount++;
 
-        // Stride displacement: proportional step forward or backward
-        const isRetreating = rawForwardAcc < -0.3;
-        const strideMeters = (isRetreating ? -0.38 : 0.44) * this.motionSensitivity;
+        // Stride displacement: step forward or backward in room
+        const isRetreating = rawForwardAcc < -0.2;
+        const strideMeters = (isRetreating ? -0.55 : 0.65) * this.motionSensitivity;
         this.moveForward(strideMeters);
         this.triggerHaptic('step');
       }
@@ -265,8 +265,8 @@ export class SensorManager {
     this.prevMag = netMag;
 
     // 4. Continuous physical thrust integration (pushing / pulling phone in air)
-    // Soft-knee deadband to reject hand micro-tremors without sacrificing responsiveness
-    const deadband = 0.22;
+    // Responsive deadband to reject hand micro-tremors without losing intentional motion
+    const deadband = 0.12;
     const applyDeadband = (val: number): number => {
       const abs = Math.abs(val);
       if (abs < deadband) return 0;
@@ -277,12 +277,12 @@ export class SensorManager {
     const accStrafe = applyDeadband(rawStrafeAcc);
 
     // Integrate into velocity with calibrated gain
-    const thrustGain = 2.6 * this.motionSensitivity;
+    const thrustGain = 3.6 * this.motionSensitivity;
     if (accFwd !== 0) {
       this.linearVelocity.z += accFwd * dt * thrustGain;
     }
     if (accStrafe !== 0) {
-      this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.7);
+      this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.8);
     }
 
     // Natural friction damping: smooth halt when phone stops moving
@@ -647,20 +647,40 @@ export class SensorManager {
       const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
       rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
 
-      // 2. Natural physical lean forward / backward:
-      // When the user tilts/leans the phone forward beyond resting angle (+12 deg), advance forward.
-      // When tilted backward (-12 deg), retreat backward smoothly.
-      const betaDiff = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
-      if (Math.abs(betaDiff) > 12) {
-        const leanFactor = Math.sign(betaDiff) * Math.min(1.3, (Math.abs(betaDiff) - 12) * 0.035) * this.motionSensitivity;
-        const forwardDirX = -Math.sin(yawRad);
-        const forwardDirZ = -Math.cos(yawRad);
-        const dtFrame = 0.016;
-        const leanDisp = leanFactor * dtFrame;
+      // 2. Natural physical tilt to walk & explore the room:
+      // Tilting top of phone forward into the room advances forward in the direction aimed.
+      // Tilting top of phone backward steps backward. Tilting sideways strafes.
+      const forwardTiltDeg = (this.calibratedBeta || 65) - this.smoothedOrientation.beta;
+      const dtFrame = 0.016;
+      const forwardDirX = -Math.sin(yawRad);
+      const forwardDirZ = -Math.cos(yawRad);
+      const rightDirX = Math.cos(yawRad);
+      const rightDirZ = -Math.sin(yawRad);
 
-        this.targetPosition.x += forwardDirX * leanDisp;
-        this.targetPosition.z += forwardDirZ * leanDisp;
-        this.targetPosition.forwardDistance += leanDisp;
+      if (forwardTiltDeg > 5) {
+        // Walk forward in gaze direction
+        const forwardSpeed = Math.min(2.8, (forwardTiltDeg - 5) * 0.16) * this.motionSensitivity;
+        const forwardDisp = forwardSpeed * dtFrame;
+        this.targetPosition.x += forwardDirX * forwardDisp;
+        this.targetPosition.z += forwardDirZ * forwardDisp;
+        this.targetPosition.forwardDistance += forwardDisp;
+        this.clampTargetPosition();
+      } else if (forwardTiltDeg < -6) {
+        // Step backward
+        const retreatSpeed = Math.max(-2.2, (forwardTiltDeg + 6) * 0.14) * this.motionSensitivity;
+        const retreatDisp = retreatSpeed * dtFrame;
+        this.targetPosition.x += forwardDirX * retreatDisp;
+        this.targetPosition.z += forwardDirZ * retreatDisp;
+        this.targetPosition.forwardDistance += retreatDisp;
+        this.clampTargetPosition();
+      }
+
+      // Roll tilt: tilting phone sideways strafes left or right
+      if (Math.abs(deltaGamma) > 7) {
+        const strafeSpeed = Math.sign(deltaGamma) * Math.min(2.2, (Math.abs(deltaGamma) - 7) * 0.14) * this.motionSensitivity;
+        const strafeDisp = strafeSpeed * dtFrame;
+        this.targetPosition.x += rightDirX * strafeDisp;
+        this.targetPosition.z += rightDirZ * strafeDisp;
         this.clampTargetPosition();
       }
     } else {
@@ -780,6 +800,11 @@ export class SensorManager {
         // Ignore on unsupported browsers
       }
     }
+  }
+
+  public simulateScream(isScreaming: boolean) {
+    this.audioMetrics.isScreaming = isScreaming;
+    this.audioMetrics.volume = isScreaming ? 0.95 : 0;
   }
 
   public destroy() {

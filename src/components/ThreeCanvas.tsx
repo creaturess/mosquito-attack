@@ -500,7 +500,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     window.addEventListener('mousemove', onPointerMove as unknown as EventListener);
     window.addEventListener('mouseup', onMouseUp);
 
-    // --- 7. Keyboard Navigation & 'D' key for Debug Toggle ---
+    // --- 7. Keyboard Navigation & F3 for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
         sensorManager.moveForward(0.35);
@@ -508,7 +508,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         sensorManager.moveForward(-0.35);
       } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
         sensorManager.moveStrafe(-0.35);
-      } else if (e.key === 'd' || e.key === 'D') {
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        sensorManager.moveStrafe(0.35);
+      } else if (e.key === 'F3') {
         onToggleDebugRef.current?.();
       }
     };
