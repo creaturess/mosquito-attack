@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ThreeCanvas, GameState, NearestMosquitoInfo } from './components/ThreeCanvas';
+import { ThreeCanvas, GameState, NearestMosquitoInfo, DebugNestInfo } from './components/ThreeCanvas';
 import { UIOverlay } from './components/UIOverlay';
 import { PermissionsModal } from './components/PermissionsModal';
 import { LevelModal } from './components/LevelModal';
@@ -57,9 +57,17 @@ export default function App() {
   const [forwardDistance, setForwardDistance] = useState(0);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(() => sensorManager.getCameraStream());
   const [nearestMosquito, setNearestMosquito] = useState<NearestMosquitoInfo | null>(null);
+  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [debugNests, setDebugNests] = useState<DebugNestInfo[]>([]);
+  const [proximityHeat, setProximityHeat] = useState(0);
+  const [isAimingNear, setIsAimingNear] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerIntervalRef = useRef<number | null>(null);
+
+  const handleToggleDebug = useCallback(() => {
+    setIsDebugMode((prev) => !prev);
+  }, []);
 
   // Poll sensor volume, spatial position and status for UI HUD
   useEffect(() => {
@@ -265,6 +273,13 @@ export default function App() {
         isARMode={gameState.isARMode}
         videoElement={null}
         onNearestMosquitoUpdate={setNearestMosquito}
+        isDebugMode={isDebugMode}
+        onToggleDebug={handleToggleDebug}
+        onDebugUpdate={setDebugNests}
+        onProximityHeatUpdate={(heat, aiming) => {
+          setProximityHeat(heat);
+          setIsAimingNear(aiming);
+        }}
       />
 
       {/* HUD & Sensor Overlay */}
@@ -276,6 +291,11 @@ export default function App() {
         onCalibrateGyro={handleCalibrateGyro}
         forwardDistance={forwardDistance}
         nearestMosquito={nearestMosquito}
+        proximityHeat={proximityHeat}
+        isAimingNear={isAimingNear}
+        isDebugMode={isDebugMode}
+        onToggleDebug={handleToggleDebug}
+        debugNests={debugNests}
       />
 
       {/* Onboarding & Sensor Permissions Modal */}

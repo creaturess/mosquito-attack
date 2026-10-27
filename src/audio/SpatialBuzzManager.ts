@@ -93,27 +93,20 @@ export class SpatialBuzzManager {
     relY: number,
     relZ: number,
     isBoss: boolean = false,
-    speedFactor: number = 1.0
+    speedFactor: number = 1.0,
+    speedRatio: number = 1.0
   ) {
     if (!this.ctx || this.isMuted) return;
 
     const now = this.ctx.currentTime;
     const distance = Math.max(0.25, Math.sqrt(relX * relX + relY * relY + relZ * relZ));
 
-    // --- PROXIMITY & GUIDANCE AUDIO GAIN ---
-    // Maintain a distinct audible floor (0.13 - 0.18) even at 6m-9m so sound can guide the player
-    // Ramps up dramatically to 0.85 - 1.0 when approaching (< 1.2m)
-    const floorPresence = isBoss ? 0.22 : 0.14;
-    const proximityRamp = Math.min(0.85, Math.pow(1.35 / Math.max(0.45, distance), 1.3) * 0.45);
-    let distanceGain = Math.min(1.0, floorPresence + proximityRamp);
-
-    // Acoustic aim focus: when the mosquito is in front and centered in player's field of view,
-    // boost presence so sound acts as an acoustic radar
-    const isInFront = relZ < 0;
-    const isCentered = isInFront && Math.abs(relX) < 1.6;
-    if (isCentered) {
-      distanceGain = Math.min(1.0, distanceGain * 1.22);
-    }
+    // --- 3. DISTANCE ROLLOFF (casi inaudible a 8m, muy fuerte a 1-2m) ---
+    // Clear rolloff curve: below 8m ramps smoothly; beyond 8m is a tiny imperceptible trace (0.015)
+    const distNorm = Math.max(0, Math.min(1, (8.0 - distance) / 6.8));
+    let distanceGain = isBoss
+      ? Math.max(0.08, Math.min(1.0, Math.pow(distNorm, 1.4) * 0.95 + 0.05))
+      : Math.pow(distNorm, 1.85) * 0.96 + 0.015;
 
     let voice = this.activeVoices.get(id);
 
@@ -244,28 +237,21 @@ export class SpatialBuzzManager {
     // 2. Proximity Volume Intensity
     voice.gain.gain.setTargetAtTime(Math.max(0.001, distanceGain), now, 0.04);
 
-    // 3. Air Absorption & Directivity Cutoff (Crisp highs when aimed at it, softer when behind)
-    let targetCutoff: number;
-    if (isBoss) {
-      targetCutoff = Math.max(700, Math.min(2600, 2600 - distance * 220));
-    } else if (isInFront) {
-      targetCutoff = Math.max(2400, Math.min(7600, 7600 - (distance - 0.4) * 600));
-      if (isCentered) {
-        targetCutoff = Math.min(8000, targetCutoff + 700); // Acoustic spotlight when aimed directly at it
-      }
-    } else {
-      // Behind player: softer highs, prompting player to turn their phone to face the sound
-      targetCutoff = Math.max(1800, Math.min(3800, 4200 - distance * 300));
-    }
-    voice.lowpassFilter.frequency.setTargetAtTime(targetCutoff, now, 0.05);
+    // 3. Directional Lowpass Filter (apuntado = claro y brillante, costados/atrás = apagado)
+    // -relZ / distance: 1.0 when pointing directly at it, 0 at 90 deg lateral, -1.0 when directly behind
+    const aimAlignment = Math.max(-1.0, Math.min(1.0, -relZ / distance));
+    const aimFactor = (aimAlignment + 1.0) / 2.0; // 0 (behind) to 1.0 (straight ahead)
+    
+    // Lerp from 1300Hz (behind, dark/muffled) to 8200Hz (front, biting and crisp)
+    let targetCutoff = 1300 + Math.pow(aimFactor, 1.4) * 6900;
+    // Air absorption over distance
+    targetCutoff = Math.max(900, targetCutoff - Math.max(0, distance - 2.0) * 350);
+    voice.lowpassFilter.frequency.setTargetAtTime(targetCutoff, now, 0.04);
 
-    // 4. Subtle Doppler pitch surge when zooming very close (< 1.2m)
-    if (distance < 1.2) {
-      const closeSurge = (1.2 - distance) * 28;
-      voice.oscPrimary.frequency.setTargetAtTime(voice.baseFreq + closeSurge, now, 0.05);
-    } else {
-      voice.oscPrimary.frequency.setTargetAtTime(voice.baseFreq, now, 0.1);
-    }
+    // 4. Pitch & flutter variation with mosquito speed (nota cuando acelera)
+    const speedPitch = (speedRatio - 1.0) * 85;
+    const closeSurge = distance < 1.3 ? (1.3 - distance) * 35 : 0;
+    voice.oscPrimary.frequency.setTargetAtTime(voice.baseFreq + speedPitch + closeSurge, now, 0.05);
   }
 
   /**

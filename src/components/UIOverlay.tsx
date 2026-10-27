@@ -1,10 +1,11 @@
 /**
  * UIOverlay.tsx
  * Clean, distraction-free AR combat HUD:
- * - Top header with audio mute control
+ * - Subtle "caliente/frío" perimeter vignette that intensifies when close to a mosquito
+ * - Discreet center aim reticle with subtle visual pulse when aiming near a mosquito
+ * - Top header with audio mute control & interactive Debug toggle button
  * - Game HUD (Level badge, kills/target counter, countdown timer, Boss scream gauge)
- * - Subtle screen edge guidance arrows
- * - Virtual joystick for movement
+ * - Optional Debug HUD window showing all fixed world nests, 3D distances, and alive counts
  * - Instant tap/swat feedback reticle
  */
 
@@ -17,9 +18,11 @@ import {
   Skull,
   Flame,
   Radio,
+  Eye,
+  Crosshair,
 } from 'lucide-react';
-import { SensorStatus, sensorManager } from '../sensors/SensorManager';
-import { GameState, NearestMosquitoInfo } from './ThreeCanvas';
+import { SensorStatus } from '../sensors/SensorManager';
+import { GameState, NearestMosquitoInfo, DebugNestInfo } from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
 interface UIOverlayProps {
@@ -30,13 +33,22 @@ interface UIOverlayProps {
   onCalibrateGyro?: () => void;
   forwardDistance?: number;
   nearestMosquito?: NearestMosquitoInfo | null;
+  proximityHeat?: number;
+  isAimingNear?: boolean;
+  isDebugMode?: boolean;
+  onToggleDebug?: () => void;
+  debugNests?: DebugNestInfo[];
 }
 
 export const UIOverlay: React.FC<UIOverlayProps> = ({
   gameState,
   currentVolume,
   isScreaming,
-  nearestMosquito,
+  proximityHeat = 0,
+  isAimingNear = false,
+  isDebugMode = false,
+  onToggleDebug,
+  debugNests = [],
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
@@ -87,14 +99,64 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
   const screamPercent = Math.min(100, (gameState.screamSecondsAccumulated / 10) * 100);
 
+  // Subtle hot/cold vignette intensity calculation
+  // At heat 0: completely transparent
+  // As player gets closer (heat 0.1 to 1.0): smooth perimeter glow
+  const vignetteAlpha = Math.min(0.55, proximityHeat * 0.55);
+  const vignetteSpread = Math.round(18 + proximityHeat * 50);
+
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3 select-none">
-      {/* --- TOP ROW: AUDIO CONTROLS & HUD --- */}
+      {/* --- SUBTLE HOT/COLD PERIMETER VIGNETTE (CALIENTE / FRÍO) --- */}
+      {proximityHeat > 0.05 && (
+        <div
+          className="pointer-events-none absolute inset-0 transition-all duration-300 ease-out"
+          style={{
+            boxShadow: `inset 0 0 ${vignetteSpread}px rgba(244, 63, 94, ${vignetteAlpha.toFixed(2)})`,
+          }}
+        />
+      )}
+
+      {/* --- MINIMAL CENTER AIM CROSSHAIR --- */}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div
+          className={`flex items-center justify-center rounded-full transition-all duration-200 ${
+            isAimingNear
+              ? 'scale-125 border-2 border-amber-400 bg-amber-400/20 shadow-lg shadow-amber-500/50'
+              : 'border border-white/25 bg-black/10'
+          } h-8 w-8`}
+        >
+          <Crosshair
+            className={`h-4 w-4 transition-colors duration-200 ${
+              isAimingNear ? 'text-amber-300 animate-spin' : 'text-white/40'
+            }`}
+          />
+        </div>
+      </div>
+
+      {/* --- TOP ROW: CONTROLS & HUD --- */}
       <div className="flex flex-col gap-2 w-full">
-        {/* Top bar right control */}
-        <div className="flex items-center justify-end w-full">
+        {/* Top bar buttons */}
+        <div className="flex items-center justify-between w-full">
+          {/* Debug Toggle Button */}
+          <button
+            onClick={onToggleDebug}
+            data-no-swat="true"
+            aria-label="Alternar modo depuración"
+            className={`pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur-md transition shadow-lg active:scale-95 ${
+              isDebugMode
+                ? 'border-emerald-400 bg-emerald-950/80 text-emerald-300'
+                : 'border-white/15 bg-black/60 text-slate-300 hover:text-white hover:bg-black/80'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            <span>DEBUG {isDebugMode ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {/* Sound Mute Button */}
           <button
             onClick={toggleMute}
+            data-no-swat="true"
             aria-label={isMuted ? 'Activar sonido' : 'Silenciar'}
             className="pointer-events-auto flex items-center justify-center rounded-full border border-white/15 bg-black/60 p-2.5 text-slate-200 transition hover:bg-black/80 hover:text-white active:scale-95 backdrop-blur-md shadow-xl"
           >
@@ -181,6 +243,50 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       </div>
 
+      {/* --- DEBUG MODE OVERLAY PANEL --- */}
+      {isDebugMode && (
+        <div
+          data-no-swat="true"
+          className="pointer-events-auto absolute top-20 left-3 max-w-xs rounded-xl border border-emerald-500/40 bg-black/85 p-3 text-xs backdrop-blur-lg shadow-2xl text-slate-200 overflow-y-auto max-h-[60vh]"
+        >
+          <div className="flex items-center justify-between pb-1.5 border-b border-white/10 font-bold text-emerald-400">
+            <span>MODO DEBUG (NIDOS 3D)</span>
+            <span className="text-[10px] text-slate-400">Tecla &apos;D&apos; para alternar</span>
+          </div>
+
+          <div className="mt-2 space-y-1.5">
+            {debugNests.map((nest, idx) => (
+              <div
+                key={nest.id}
+                className="flex items-center justify-between rounded bg-white/5 px-2 py-1"
+              >
+                <div>
+                  <span className="font-bold text-slate-100">Nido {idx + 1}:</span>{' '}
+                  <span className="font-mono text-emerald-300">{nest.distance}m</span>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    [{nest.x}, {nest.y}, {nest.z}]
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                      nest.aliveCount > 0 ? 'bg-emerald-900/80 text-emerald-300' : 'bg-rose-900/80 text-rose-300'
+                    }`}
+                  >
+                    {nest.aliveCount > 0 ? `${nest.aliveCount} vivo` : 'reapareciendo...'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 pt-1 border-t border-white/10 text-[10px] text-slate-400">
+            Calor proximidad: <span className="font-mono text-amber-300">{Math.round(proximityHeat * 100)}%</span>
+            {isAimingNear && <span className="ml-1 text-emerald-300 font-bold">| ¡Apuntando a mosquito!</span>}
+          </div>
+        </div>
+      )}
+
       {/* --- RETICLE / TAP SQUISH FEEDBACK --- */}
       {swatEffect && (
         <div
@@ -190,9 +296,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
           <div className="h-16 w-16 rounded-full border-4 border-rose-500/80 bg-rose-500/20 animate-ping" />
         </div>
       )}
-
-
-
     </div>
   );
 };
