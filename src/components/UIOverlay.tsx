@@ -2,7 +2,8 @@
  * UIOverlay.tsx
  * Clean, distraction-free AR combat HUD:
  * - Subtle "caliente/frío" perimeter vignette that intensifies when close to a mosquito
- * - Discreet center aim reticle with subtle visual pulse when aiming near a mosquito
+ * - Reactive center aim reticle with target lock animation when pointing at a mosquito
+ * - Subtle screen edge exit indicator (arrow/tag) showing where a mosquito just exited for ~1.5s
  * - Top header with audio mute control & interactive Debug toggle button
  * - Game HUD (Level badge, kills/target counter, countdown timer, Boss scream gauge)
  * - Optional Debug HUD window showing all fixed world nests, 3D distances, and alive counts
@@ -22,7 +23,12 @@ import {
   Crosshair,
 } from 'lucide-react';
 import { SensorStatus } from '../sensors/SensorManager';
-import { GameState, NearestMosquitoInfo, DebugNestInfo } from './ThreeCanvas';
+import {
+  GameState,
+  NearestMosquitoInfo,
+  DebugNestInfo,
+  EdgeIndicatorInfo,
+} from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 
 interface UIOverlayProps {
@@ -35,6 +41,7 @@ interface UIOverlayProps {
   nearestMosquito?: NearestMosquitoInfo | null;
   proximityHeat?: number;
   isAimingNear?: boolean;
+  edgeIndicator?: EdgeIndicatorInfo | null;
   isDebugMode?: boolean;
   onToggleDebug?: () => void;
   debugNests?: DebugNestInfo[];
@@ -46,6 +53,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   isScreaming,
   proximityHeat = 0,
   isAimingNear = false,
+  edgeIndicator = null,
   isDebugMode = false,
   onToggleDebug,
   debugNests = [],
@@ -100,8 +108,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   const screamPercent = Math.min(100, (gameState.screamSecondsAccumulated / 10) * 100);
 
   // Subtle hot/cold vignette intensity calculation
-  // At heat 0: completely transparent
-  // As player gets closer (heat 0.1 to 1.0): smooth perimeter glow
   const vignetteAlpha = Math.min(0.55, proximityHeat * 0.55);
   const vignetteSpread = Math.round(18 + proximityHeat * 50);
 
@@ -117,21 +123,46 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         />
       )}
 
-      {/* --- MINIMAL CENTER AIM CROSSHAIR --- */}
+      {/* --- SUBTLE SCREEN EDGE EXIT INDICATOR (Fades over ~1.5s when losing sight) --- */}
+      {edgeIndicator && edgeIndicator.opacity > 0.05 && (
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden transition-opacity duration-150"
+          style={{ opacity: edgeIndicator.opacity }}
+        >
+          <div
+            className="absolute flex items-center justify-center"
+            style={{
+              transform: `translate(${Math.max(-42, Math.min(42, edgeIndicator.x * 40))}vw, ${Math.max(-40, Math.min(40, -edgeIndicator.y * 38))}vh) rotate(${-Math.atan2(edgeIndicator.y, edgeIndicator.x)}rad)`,
+            }}
+          >
+            <div className="flex items-center gap-1.5 rounded-full border border-sky-400/80 bg-slate-950/85 px-3 py-1 text-sky-300 shadow-xl shadow-sky-500/40 backdrop-blur-md animate-pulse">
+              <span className="text-xs font-bold">▶</span>
+              <span className="text-[10px] font-black tracking-widest uppercase">MOSQUITO</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- REACTIVE CENTER AIM RETICLE --- */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div
           className={`flex items-center justify-center rounded-full transition-all duration-200 ${
             isAimingNear
-              ? 'scale-125 border-2 border-amber-400 bg-amber-400/20 shadow-lg shadow-amber-500/50'
-              : 'border border-white/25 bg-black/10'
-          } h-8 w-8`}
+              ? 'scale-135 border-2 border-amber-400 bg-amber-400/25 shadow-xl shadow-amber-500/60 ring-2 ring-amber-300/40'
+              : 'border border-white/30 bg-black/15 shadow-sm'
+          } h-9 w-9`}
         >
           <Crosshair
-            className={`h-4 w-4 transition-colors duration-200 ${
-              isAimingNear ? 'text-amber-300 animate-spin' : 'text-white/40'
+            className={`h-4 w-4 transition-all duration-200 ${
+              isAimingNear ? 'text-amber-300 scale-110' : 'text-white/50'
             }`}
           />
         </div>
+        {isAimingNear && (
+          <div className="absolute -translate-y-8 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-amber-300 backdrop-blur-sm border border-amber-400/50 animate-bounce">
+            OBJETIVO A LA VISTA
+          </div>
+        )}
       </div>
 
       {/* --- TOP ROW: CONTROLS & HUD --- */}

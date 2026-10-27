@@ -8,6 +8,8 @@
  * - 3D HRTF spatial panner following player phone orientation and position
  */
 
+import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
+
 export class SpatialBuzzManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -221,14 +223,15 @@ export class SpatialBuzzManager {
     }
 
     // --- REALTIME DISTANCE-REACTIVE AUDIO UPDATES ---
-    // 1. Update Spatial Panner Coordinates
+    // 1. Update Spatial Panner Coordinates with amplified stereo separation
+    const stereoX = relX * GAMEPLAY_CONFIG.trackingAid.stereoSpreadBoost;
     if ('positionX' in voice.panner) {
-      voice.panner.positionX.setTargetAtTime(relX, now, 0.04);
+      voice.panner.positionX.setTargetAtTime(stereoX, now, 0.04);
       voice.panner.positionY.setTargetAtTime(relY, now, 0.04);
       voice.panner.positionZ.setTargetAtTime(relZ, now, 0.04);
     } else {
       (voice.panner as unknown as { setPosition: (x: number, y: number, z: number) => void }).setPosition(
-        relX,
+        stereoX,
         relY,
         relZ
       );

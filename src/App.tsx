@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ThreeCanvas, GameState, NearestMosquitoInfo, DebugNestInfo } from './components/ThreeCanvas';
+import { ThreeCanvas, GameState, NearestMosquitoInfo, DebugNestInfo, EdgeIndicatorInfo } from './components/ThreeCanvas';
 import { UIOverlay } from './components/UIOverlay';
 import { PermissionsModal } from './components/PermissionsModal';
 import { LevelModal } from './components/LevelModal';
@@ -61,6 +61,7 @@ export default function App() {
   const [debugNests, setDebugNests] = useState<DebugNestInfo[]>([]);
   const [proximityHeat, setProximityHeat] = useState(0);
   const [isAimingNear, setIsAimingNear] = useState(false);
+  const [edgeIndicator, setEdgeIndicator] = useState<EdgeIndicatorInfo | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerIntervalRef = useRef<number | null>(null);
@@ -280,6 +281,7 @@ export default function App() {
           setProximityHeat(heat);
           setIsAimingNear(aiming);
         }}
+        onEdgeIndicatorUpdate={setEdgeIndicator}
       />
 
       {/* HUD & Sensor Overlay */}
@@ -293,6 +295,7 @@ export default function App() {
         nearestMosquito={nearestMosquito}
         proximityHeat={proximityHeat}
         isAimingNear={isAimingNear}
+        edgeIndicator={edgeIndicator}
         isDebugMode={isDebugMode}
         onToggleDebug={handleToggleDebug}
         debugNests={debugNests}
