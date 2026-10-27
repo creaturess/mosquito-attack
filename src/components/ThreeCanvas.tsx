@@ -127,22 +127,21 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     // --- 4. Mosquito Population Management ---
     let mosquitoes: Mosquito[] = [];
     let nextMosquitoId = 1;
-    let spawnTimer = 0;
     let currentKills = 0;
     let accumulatedScreamTime = 0;
     let bossInstance: Mosquito | null = null;
+    let ambushSpawnTimer = 0;
+    let nextAmbushDelay = 0.5;
 
-    // Dispersed individual spawn with varied distances (Near, Mid, Far)
-    const spawnMosquito = (isBoss: boolean = false, sectorIndex?: number, totalWave: number = 8) => {
+    // Helper to spawn a surprise ambush mosquito from behind the player's current view frustum
+    const spawnAmbushMosquito = (isBoss: boolean = false) => {
       const id = `mosquito_${nextMosquitoId++}`;
       const currentLvl = stateRef.current.currentLevel;
-      let scale = 1.0;
-      let speed = 0.14;
 
       if (isBoss) {
-        scale = 3.8;
-        speed = 0.16;
-        const initialPosition = new THREE.Vector3(0.0, 1.6, -1.85);
+        const scale = 3.8;
+        const speed = 0.16;
+        const initialPosition = new THREE.Vector3(0.0, 1.6, -2.2);
         const mos = new Mosquito({
           id,
           isBoss: true,
@@ -157,62 +156,38 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         return mos;
       }
 
-      // Varied distance tiers: Near (1.3m - 1.7m), Mid (1.9m - 2.7m), Far (2.8m - 3.7m)
-      const DISTANCE_TIERS = [1.45, 2.3, 3.2, 1.6, 2.7, 3.5, 1.35, 2.2];
-      let assignedAngle: number;
-      let assignedRadius: number;
+      // 1. Get the player's current gaze direction in the horizontal plane (XZ)
+      const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      camForward.y = 0;
+      if (camForward.lengthSq() < 0.001) camForward.set(0, 0, -1);
+      camForward.normalize();
 
-      if (sectorIndex !== undefined) {
-        // Individual partition across 360-degrees with jitter
-        const angleStep = (Math.PI * 2) / totalWave;
-        assignedAngle = sectorIndex * angleStep + (Math.random() - 0.5) * 0.35;
-        const baseRadius = DISTANCE_TIERS[sectorIndex % DISTANCE_TIERS.length];
-        assignedRadius = baseRadius + (Math.random() - 0.5) * 0.3;
-      } else {
-        // Dynamic replacement spawn: find the largest angular gap from living mosquitoes
-        let bestAngle = Math.random() * Math.PI * 2;
-        let maxMinGap = -1;
-        const aliveMos = mosquitoes.filter((m) => !m.isDead);
+      // 2. GUARANTEE SPAWN IN THE BLIND SPOT OUTSIDE CAMERA FIELD OF VIEW
+      // Base blind spot is strictly behind the camera: camForward.clone().negate()
+      // Pick a random rear angle (-65 degrees to +65 degrees behind the player)
+      const rearAngleOffset = (Math.random() - 0.5) * (Math.PI * 0.72);
+      const spawnDir = camForward
+        .clone()
+        .negate()
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), rearAngleOffset)
+        .normalize();
 
-        for (let candidate = 0; candidate < 16; candidate++) {
-          const testAngle = (candidate * (Math.PI * 2)) / 16 + (Math.random() - 0.5) * 0.2;
-          let minDiff = Math.PI;
-          for (const m of aliveMos) {
-            let diff = Math.abs(testAngle - m.assignedAngle);
-            if (diff > Math.PI) diff = Math.PI * 2 - diff;
-            if (diff < minDiff) minDiff = diff;
-          }
-          if (minDiff > maxMinGap) {
-            maxMinGap = minDiff;
-            bestAngle = testAngle;
-          }
-        }
+      // Spawn at 3.6m to 4.4m behind the player (far outside view, perfect for surprise dive)
+      const spawnDist = 3.6 + Math.random() * 0.8;
+      const initialPosition = camera.position.clone().add(spawnDir.clone().multiplyScalar(spawnDist));
+      // Variable height from above or behind (1.1m to 2.8m)
+      initialPosition.y = Math.max(1.1, Math.min(2.8, camera.position.y + (Math.random() - 0.25) * 1.5));
 
-        assignedAngle = bestAngle;
-        const tierChoice = Math.floor(Math.random() * 3);
-        assignedRadius =
-          tierChoice === 0
-            ? 1.35 + Math.random() * 0.35 // Near
-            : tierChoice === 1
-            ? 2.0 + Math.random() * 0.6   // Mid
-            : 2.8 + Math.random() * 0.8;  // Far
-      }
+      // 3. Ambush Swoop Target: The mosquito swoops from the blind spot into the room space!
+      // Pick a target in front or to the side of the player (1.7m to 2.8m away)
+      const targetSideAngle = (Math.random() > 0.5 ? 1 : -1) * (0.35 + Math.random() * 0.9);
+      const targetDir = camForward.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), targetSideAngle).normalize();
+      const targetDist = 1.7 + Math.random() * 1.1;
+      const ambushTargetPos = camera.position.clone().add(targetDir.multiplyScalar(targetDist));
+      ambushTargetPos.y = camera.position.y + (Math.random() - 0.5) * 0.7;
 
-      // Altitude / pitch variation
-      const pitch = (Math.random() - 0.4) * 0.5;
-      const initialPosition = new THREE.Vector3(
-        Math.cos(assignedAngle) * Math.cos(pitch) * assignedRadius,
-        Math.max(0.9, Math.min(2.4, 1.6 + Math.sin(pitch) * assignedRadius)),
-        Math.sin(assignedAngle) * Math.cos(pitch) * assignedRadius
-      );
-
-      if (currentLvl === 1) {
-        scale = 1.35;
-        speed = 0.14;
-      } else {
-        scale = 1.05;
-        speed = 0.22;
-      }
+      const scale = currentLvl === 1 ? 1.35 : 1.05;
+      const speed = currentLvl === 1 ? 0.16 : 0.23;
 
       const mos = new Mosquito({
         id,
@@ -221,13 +196,19 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         speed,
         initialPosition,
         level: currentLvl,
-        assignedAngle,
-        assignedRadius,
+        isAmbush: true,
+        ambushTargetPos,
+        assignedAngle: Math.atan2(ambushTargetPos.z - camera.position.z, ambushTargetPos.x - camera.position.x),
+        assignedRadius: targetDist,
         preferredAltitudeOffset: (Math.random() - 0.5) * 0.6,
       });
 
       scene.add(mos.group);
       mosquitoes.push(mos);
+
+      // Trigger audio pitch surge as it starts its surprise dive!
+      buzzManager.triggerAttackFlutter(id);
+
       return mos;
     };
 
@@ -241,25 +222,21 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       bossInstance = null;
     };
 
-    // Initialize level population
+    // Initialize level population with staggered ambush attacks
     const initLevelSpawns = () => {
       clearMosquitoes();
       currentKills = 0;
       accumulatedScreamTime = 0;
+      ambushSpawnTimer = 0;
 
       if (stateRef.current.currentLevel === 3) {
-        // Spawn Giant Boss
-        spawnMosquito(true);
-        // Spawn accompanying minion mosquitoes dispersed individually
-        for (let i = 0; i < 4; i++) {
-          spawnMosquito(false, i, 4);
-        }
+        // Spawn Giant Boss in front
+        spawnAmbushMosquito(true);
+        // First surprise minion attack within 1.2s
+        nextAmbushDelay = 1.2;
       } else {
-        // Initial wave of 8 mosquitoes dispersed individually across 360° with varied distance tiers
-        const count = 8;
-        for (let i = 0; i < count; i++) {
-          spawnMosquito(false, i, count);
-        }
+        // First surprise attack launches after 0.5s from behind the player!
+        nextAmbushDelay = 0.5;
       }
     };
 
@@ -530,21 +507,26 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           }
         }
 
-        // Maintain mosquito population across all room sectors
-        spawnTimer += delta;
-        const targetActiveCount = stateRef.current.currentLevel === 3 ? 5 : 8;
+        // Maintain mosquito population through surprise ambush attacks from blind spots
+        ambushSpawnTimer += delta;
+        const targetActiveCount = stateRef.current.currentLevel === 3 ? 5 : 7;
         const aliveCount = mosquitoes.filter((m) => !m.isDead).length;
 
-        if (aliveCount < targetActiveCount && spawnTimer > 0.6) {
-          spawnTimer = 0;
-          if (stateRef.current.currentLevel < 3) {
-            const neededKills = stateRef.current.targetKills - currentKills;
-            if (aliveCount < neededKills) {
-              spawnMosquito(false);
-            }
-          } else {
-            // In level 3, spawn minions to distract
-            spawnMosquito(false);
+        if (stateRef.current.currentLevel < 3) {
+          const neededKills = stateRef.current.targetKills - currentKills;
+          const maxAllowed = Math.min(targetActiveCount, neededKills);
+          if (aliveCount < maxAllowed && ambushSpawnTimer >= nextAmbushDelay) {
+            ambushSpawnTimer = 0;
+            // Suspenseful, unpredictable ambush interval (1.4s to 2.8s)
+            nextAmbushDelay = 1.4 + Math.random() * 1.4;
+            spawnAmbushMosquito(false);
+          }
+        } else {
+          // In level 3, minions perform surprise ambush attacks from blind spots
+          if (aliveCount < targetActiveCount && ambushSpawnTimer >= nextAmbushDelay) {
+            ambushSpawnTimer = 0;
+            nextAmbushDelay = 2.0 + Math.random() * 2.2;
+            spawnAmbushMosquito(false);
           }
         }
 

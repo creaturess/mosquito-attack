@@ -21,7 +21,6 @@ import {
 import { SensorStatus, sensorManager } from '../sensors/SensorManager';
 import { GameState, NearestMosquitoInfo } from './ThreeCanvas';
 import { buzzManager } from '../audio/SpatialBuzzManager';
-import { VirtualJoystick } from './VirtualJoystick';
 
 interface UIOverlayProps {
   gameState: GameState;
@@ -194,20 +193,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
 
 
-      {/* --- BOTTOM CONTROLS: VIRTUAL JOYSTICK ONLY --- */}
-      <footer className="pb-3 pl-2 pointer-events-none">
-        <div className="flex items-end justify-between w-full">
-          {/* Virtual Joystick for touch movement (Bottom Left) */}
-          <div className="pointer-events-auto">
-            <VirtualJoystick
-              size={120}
-              onMove={(vec) => {
-                sensorManager.setJoystickInput(vec.x, vec.y);
-              }}
-            />
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };

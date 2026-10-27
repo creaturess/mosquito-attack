@@ -429,6 +429,25 @@ export class SpatialBuzzManager {
       osc.stop(t + 0.26);
     });
   }
+
+  /**
+   * Attack flutter: brief pitch surge and vibrato rush when an ambush dive starts
+   */
+  public triggerAttackFlutter(id: string) {
+    if (!this.ctx || this.isMuted) return;
+    const voice = this.activeVoices.get(id);
+    if (voice) {
+      const now = this.ctx.currentTime;
+      try {
+        voice.oscPrimary.frequency.cancelScheduledValues(now);
+        voice.oscPrimary.frequency.setValueAtTime(voice.baseFreq, now);
+        voice.oscPrimary.frequency.linearRampToValueAtTime(voice.baseFreq + 130, now + 0.35);
+        voice.oscPrimary.frequency.exponentialRampToValueAtTime(voice.baseFreq, now + 1.2);
+      } catch {
+        // Ignore audio schedule timing conflicts
+      }
+    }
+  }
 }
 
 export const buzzManager = new SpatialBuzzManager();
