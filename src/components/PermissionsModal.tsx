@@ -27,8 +27,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
     setIsRequesting(true);
 
     // 1. AudioContext on user gesture
-    buzzManager.init();
-    const audioCtx = buzzManager.getContext() || undefined;
+    const audioCtx = buzzManager.init();
 
     // 2. Gyroscope & Accelerometer
     try {

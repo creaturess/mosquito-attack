@@ -1,13 +1,14 @@
 /**
  * ThreeCanvas.tsx
  * Full-screen Three.js WebGL viewport:
- * - Fixed world nests separated >= 50° and >= 4m from each other, 5m to 12m away
- * - Max 1 mosquito per nest, max 3 active mosquitoes simultaneously (CONFIG.nests.maxActive = 3)
- * - 100% solid mosquitoes with distance-based scaling (no transparency fade)
- * - Smooth steering physics with 40°/s screen angular speed clamp and hovering pauses
- * - Never approaches closer than 3.0m to camera
- * - Audio PositionalAudio updated with the exact visual position in the same frame
- * - Generous ~0.48m hitbox
+ * - 6 fixed world-space nests (360-degree, 3.6m to 7.2m away, varied heights)
+ * - Solid mosquitoes (opacity 1.0 at <= 4m, fade-in between 6m and 4m)
+ * - Motion trail (estela de movimiento) fading over ~0.4s
+ * - Capped angular velocity (<= 75 deg/s in view) and eased turns
+ * - Screen-edge lingering and directional exit tracking
+ * - 3D HRTF spatial audio with amplified left/right stereo spread
+ * - Generous hit tolerance and reactive central targeting reticle
+ * - Interactive 3D wireframe debug visualization of nests
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -90,6 +91,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // References to keep animation loop synchronized
   const stateRef = useRef(gameState);
   stateRef.current = gameState;
 
@@ -147,7 +149,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    // --- 2. Lighting & AR Spotlight ---
+    // --- 2. Lighting & Phone Flashlight for AR ---
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);
     scene.add(ambientLight);
 
@@ -155,17 +157,11 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     dirLight.position.set(3, 6, 2);
     scene.add(dirLight);
 
-    const flashlight = new THREE.SpotLight(0xfffaec, 2.5, 16, Math.PI / 4, 0.45, 1.2);
+    const flashlight = new THREE.SpotLight(0xfffaec, 2.6, 14, Math.PI / 4, 0.45, 1.2);
     flashlight.position.set(0, 0, 0);
     camera.add(flashlight);
     flashlight.target.position.set(0, 0, -1);
     camera.add(flashlight.target);
-
-    // AudioListener attached to player camera
-    const audioListener = new THREE.AudioListener();
-    camera.add(audioListener);
-    buzzManager.init(audioListener);
-
     scene.add(camera);
 
     // --- 3. Particle System ---
@@ -187,10 +183,12 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let lastVibrateTime = 0;
     let debugUpdateThrottle = 0;
 
+    // Clear all active mosquitoes and debug meshes
     const clearMosquitoes = () => {
       mosquitoes.forEach((m) => {
         scene.remove(m.group);
-        m.kill();
+        scene.remove(m.trailLine);
+        buzzManager.stopMosquitoBuzz(m.id);
       });
       mosquitoes = [];
       bossInstance = null;
@@ -202,33 +200,49 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       nests = [];
     };
 
+    // Rebuild 3D visual markers for debug mode
     const rebuildDebugMeshes = () => {
       while (debugGroup.children.length > 0) {
         const obj = debugGroup.children[0];
         debugGroup.remove(obj);
       }
 
-      if (!CONFIG.showDebug) return;
-
       nests.forEach((nest, idx) => {
         const sphereGeo = new THREE.IcosahedronGeometry(nest.radius, 1);
         const sphereMat = new THREE.MeshBasicMaterial({
           color: idx % 2 === 0 ? 0x22c55e : 0x06b6d4,
           wireframe: true,
+          transparent: true,
+          opacity: 0.55,
         });
         const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
         sphereMesh.position.copy(nest.position);
         debugGroup.add(sphereMesh);
+
+        const coreGeo = new THREE.SphereGeometry(0.12, 8, 8);
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+        const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+        coreMesh.position.copy(nest.position);
+        debugGroup.add(coreMesh);
+
+        const poleHeight = nest.position.y;
+        const poleGeo = new THREE.CylinderGeometry(0.015, 0.015, poleHeight, 6);
+        const poleMat = new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.4 });
+        const poleMesh = new THREE.Mesh(poleGeo, poleMat);
+        poleMesh.position.set(nest.position.x, poleHeight / 2, nest.position.z);
+        debugGroup.add(poleMesh);
+
+        const ringGeo = new THREE.RingGeometry(0.2, 0.28, 16);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide });
+        const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+        ringMesh.position.set(nest.position.x, 0.02, nest.position.z);
+        debugGroup.add(ringMesh);
       });
     };
 
     /**
-     * ESCALA DE CUARTO (CONFIGURACIÓN DE NIDOS):
-     * - 8 nidos distribuidos en 360° en 8 sectores (separación horizontal mínima de 45°)
-     * - Distancia entre 2m y 5m
-     * - Altura entre -0.5m y +2.0m respecto a la cámara
-     * - 1 mosquito por nido
-     * - Al inicio, activar 5 mosquitos garantizando al menos 2 en el semicírculo frontal (<= 120°)
+     * Generate fixed world nests configured via GAMEPLAY_CONFIG
      */
     const initLevelSpawns = () => {
       clearMosquitoes();
@@ -238,8 +252,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const cfg = CONFIG;
 
       if (currentLvl === 3) {
-        // Nivel 3: Jefe a 4m al frente
-        const bossNestPos = new THREE.Vector3(0.0, camera.position.y + 0.3, -4.0);
+        // Boss level
+        const bossNestPos = new THREE.Vector3(0.5, 1.8, -4.5);
         const bossMos = new Mosquito({
           id: `boss_${nextMosquitoId++}`,
           nestId: 'boss_nest',
@@ -247,165 +261,90 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           nestRadius: 1.5,
           isBoss: true,
           scale: cfg.visibility.bossScale,
-          speed: 0.35,
+          speed: 0.2,
           level: 3,
         });
         scene.add(bossMos.group);
+        scene.add(bossMos.trailLine);
         mosquitoes.push(bossMos);
         bossInstance = bossMos;
 
-        // 2 esbirros a 3.5m
-        for (let i = 0; i < 2; i++) {
-          const angle = (i === 0 ? 1 : -1) * (Math.PI * 0.4);
-          const dist = 3.5;
-          const nestPos = new THREE.Vector3(
-            Math.cos(angle) * dist,
-            camera.position.y + 0.2,
-            Math.sin(angle) * dist
-          );
-          const nestId = `minion_nest_${i + 1}`;
+        const numMinionNests = 4;
+        for (let i = 0; i < numMinionNests; i++) {
+          const angle = (i / numMinionNests) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+          const dist = 4.2 + Math.random() * 2.8;
+          const height = 1.0 + Math.random() * 2.0;
+          const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
+          const nestRadius = 0.9 + Math.random() * 0.6;
+          const nestId = `nest_${i + 1}`;
 
+          const minionId = `mosquito_${nextMosquitoId++}`;
           const minion = new Mosquito({
-            id: `mosquito_${nextMosquitoId++}`,
+            id: minionId,
             nestId,
             nestPosition: nestPos,
-            nestRadius: cfg.nests.patrolRadius,
-            scale: cfg.visibility.baseScale,
+            nestRadius,
+            scale: cfg.visibility.baseScale * 0.9,
             speed: cfg.physics.maxSpeed,
             level: 3,
           });
           scene.add(minion.group);
+          scene.add(minion.trailLine);
           mosquitoes.push(minion);
-          nests.push({ id: nestId, position: nestPos, radius: cfg.nests.patrolRadius, mosquitoIds: [minion.id] });
-        }
-      } else {
-        // Niveles 1 y 2: Generar 8 nidos a escala de cuarto (2m a 5m)
-        const totalNests = cfg.nests.count; // 8
-        const sectorAngle = (Math.PI * 2) / totalNests; // 45°
-        const minSeparationRad = (cfg.nests.nestMinSeparationAngleDeg * Math.PI) / 180; // 45°
-        const generatedPositions: THREE.Vector3[] = [];
 
-        for (let i = 0; i < totalNests; i++) {
-          let attempts = 0;
-          let chosenPos: THREE.Vector3 | null = null;
-
-          while (attempts < 50 && !chosenPos) {
-            attempts++;
-            const baseAngle = i * sectorAngle;
-            const jitter = (Math.random() - 0.5) * (sectorAngle * 0.3);
-            const angle = baseAngle + jitter;
-
-            // Distancia entre 2m y 5m
-            const dist =
-              cfg.nests.nestMinDistance +
-              Math.random() * (cfg.nests.nestMaxDistance - cfg.nests.nestMinDistance);
-
-            // Altura entre -0.5m y +2.0m respecto a la cámara
-            const height =
-              camera.position.y +
-              (cfg.nests.minHeight + Math.random() * (cfg.nests.maxHeight - cfg.nests.minHeight));
-
-            const candidate = new THREE.Vector3(
-              Math.cos(angle) * dist,
-              height,
-              Math.sin(angle) * dist
-            );
-
-            // Validar separación angular horizontal mínima de 45°
-            let valid = true;
-            for (const existing of generatedPositions) {
-              const angleCand = Math.atan2(candidate.z, candidate.x);
-              const angleExist = Math.atan2(existing.z, existing.x);
-              let diff = Math.abs(angleCand - angleExist);
-              if (diff > Math.PI) diff = Math.PI * 2 - diff;
-              if (diff < minSeparationRad) {
-                valid = false;
-                break;
-              }
-            }
-
-            if (valid) {
-              chosenPos = candidate;
-            }
-          }
-
-          if (!chosenPos) {
-            const fallbackAngle = i * sectorAngle;
-            const fallbackDist = cfg.nests.nestMinDistance + 1.2;
-            chosenPos = new THREE.Vector3(
-              Math.cos(fallbackAngle) * fallbackDist,
-              camera.position.y + (i % 2 === 0 ? 0.7 : 0.0),
-              Math.sin(fallbackAngle) * fallbackDist
-            );
-          }
-
-          generatedPositions.push(chosenPos);
-
-          const nestId = `nest_${i + 1}`;
           nests.push({
             id: nestId,
-            position: chosenPos,
-            radius: cfg.nests.patrolRadius,
-            mosquitoIds: [],
+            position: nestPos,
+            radius: nestRadius,
+            mosquitoIds: [minionId],
           });
         }
+      } else {
+        // Levels 1 & 2: 6 fixed nests distributed 360 degrees
+        const totalNests = cfg.nests.count;
+        for (let i = 0; i < totalNests; i++) {
+          const baseAngle = (i / totalNests) * Math.PI * 2;
+          const angle = baseAngle + (Math.random() - 0.5) * 0.35;
+          const dist =
+            cfg.nests.minDistance +
+            Math.random() * (cfg.nests.maxDistance - cfg.nests.minDistance);
+          const height =
+            cfg.nests.minHeight +
+            Math.random() * (cfg.nests.maxHeight - cfg.nests.minHeight);
+          const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
+          const nestRadius = 0.9 + Math.random() * 0.6;
+          const nestId = `nest_${i + 1}`;
 
-        // Población: 1 mosquito por nido (8 en total)
-        // Al inicio, activar initialActive (5) mosquitos, garantizando al menos 2 en el semicírculo frontal (<= 120° del forward inicial (0,0,-1))
-        const initialActiveTarget = Math.min(cfg.nests.initialActive, nests.length); // 5
+          const mosPerNest = currentLvl === 1 ? (i % 3 === 0 ? 2 : 1) : (i % 2 === 0 ? 2 : 1);
+          const assignedIds: string[] = [];
 
-        const frontalIndices: number[] = [];
-        const otherIndices: number[] = [];
+          for (let m = 0; m < mosPerNest; m++) {
+            const id = `mosquito_${nextMosquitoId++}`;
+            assignedIds.push(id);
+            const speed =
+              currentLvl === 1 ? cfg.physics.maxSpeed * 0.8 : cfg.physics.maxSpeed;
 
-        nests.forEach((nest, idx) => {
-          const dirHoriz = new THREE.Vector2(nest.position.x, nest.position.z).normalize();
-          // forward inicial es (0, -1) en XZ
-          const dot = -dirHoriz.y;
-          const angleDeg = Math.acos(Math.max(-1, Math.min(1, dot))) * (180 / Math.PI);
-          if (angleDeg <= 120) {
-            frontalIndices.push(idx);
-          } else {
-            otherIndices.push(idx);
+            const mos = new Mosquito({
+              id,
+              nestId,
+              nestPosition: nestPos,
+              nestRadius,
+              scale: cfg.visibility.baseScale,
+              speed,
+              level: currentLvl,
+            });
+
+            scene.add(mos.group);
+            scene.add(mos.trailLine);
+            mosquitoes.push(mos);
           }
-        });
 
-        const activeIndices = new Set<number>();
-        // Tomar al menos 2 frontales
-        frontalIndices.sort(() => Math.random() - 0.5);
-        for (let i = 0; i < Math.min(2, frontalIndices.length); i++) {
-          activeIndices.add(frontalIndices[i]);
-        }
-
-        // Llenar el resto hasta llegar a 5 activos
-        const pool = [...frontalIndices.slice(2), ...otherIndices].sort(() => Math.random() - 0.5);
-        for (const idx of pool) {
-          if (activeIndices.size >= initialActiveTarget) break;
-          activeIndices.add(idx);
-        }
-
-        for (let i = 0; i < nests.length; i++) {
-          const nest = nests[i];
-          const id = `mosquito_${nextMosquitoId++}`;
-          nest.mosquitoIds.push(id);
-
-          const mos = new Mosquito({
-            id,
-            nestId: nest.id,
-            nestPosition: nest.position,
-            nestRadius: nest.radius,
-            scale: cfg.visibility.baseScale,
-            speed: cfg.physics.maxSpeed,
-            level: currentLvl,
+          nests.push({
+            id: nestId,
+            position: nestPos,
+            radius: nestRadius,
+            mosquitoIds: assignedIds,
           });
-
-          // Los no seleccionados inician inactivos/muertos como reserva de respawn
-          if (!activeIndices.has(i)) {
-            mos.kill();
-            mos.group.visible = false;
-          }
-
-          scene.add(mos.group);
-          mosquitoes.push(mos);
         }
       }
 
@@ -419,7 +358,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     const mousePos = new THREE.Vector2();
 
     const handleSwat = (clientX: number, clientY: number) => {
-      buzzManager.resumeContext();
       if (!stateRef.current.isPlaying) return;
 
       mousePos.x = (clientX / window.innerWidth) * 2 - 1;
@@ -429,7 +367,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
       const hitObjects: THREE.Object3D[] = [];
       mosquitoes.forEach((m) => {
-        if (!m.isDead && m.group.visible) {
+        if (!m.isDead) {
           hitObjects.push(m.hitSphere);
         }
       });
@@ -448,13 +386,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         }
       }
 
-      // Proximidad en pantalla con tolerancia generosa
+      // Screen-space proximity fallback with generous tolerance
       if (!hitTarget) {
         let bestDistancePx = CONFIG.combat.screenTouchTolerancePx;
         const screenPos = new THREE.Vector3();
 
         for (const mos of mosquitoes) {
-          if (mos.isDead || !mos.group.visible) continue;
+          if (mos.isDead) continue;
           screenPos.setFromMatrixPosition(mos.group.matrixWorld);
 
           const viewPos = screenPos.clone().applyMatrix4(camera.matrixWorldInverse);
@@ -482,7 +420,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           particles.emitSplat(hitPoint, true);
         } else {
           hitTarget.kill();
-          hitTarget.group.visible = false;
+          buzzManager.stopMosquitoBuzz(hitTarget.id);
           buzzManager.playSwatSfx();
           sensorManager.triggerHaptic('swat');
           particles.emitSplat(hitPoint, false);
@@ -507,7 +445,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         targetEl &&
         (targetEl.closest('[data-no-swat]') ||
           targetEl.closest('button') ||
-          targetEl.closest('input'))
+          targetEl.closest('input') ||
+          targetEl.closest('.pointer-events-auto'))
       ) {
         return;
       }
@@ -549,6 +488,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     window.addEventListener('mousemove', onPointerMove as unknown as EventListener);
     window.addEventListener('mouseup', onMouseUp);
 
+    // --- 7. Keyboard Navigation & 'D' key for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
         sensorManager.moveForward(0.35);
@@ -556,8 +496,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         sensorManager.moveForward(-0.35);
       } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
         sensorManager.moveStrafe(-0.35);
-      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-        sensorManager.moveStrafe(0.35);
+      } else if (e.key === 'd' || e.key === 'D') {
+        onToggleDebugRef.current?.();
       }
     };
 
@@ -568,6 +508,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('wheel', handleWheel, { passive: true });
 
+    // --- 8. Window Resize ---
     const handleResize = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
@@ -578,7 +519,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
-    // --- 7. Animation Loop ---
+    // --- 9. Animation Loop ---
     let animationFrameId: number;
     let lastTime = performance.now();
     let lastObservedLevel = stateRef.current.currentLevel;
@@ -601,23 +542,26 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       debugGroup.visible = CONFIG.showDebug && isDebugModeRef.current;
 
       const now = performance.now();
-      const delta = Math.min((now - lastTime) / 1000, 0.05);
+      const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
+      // Update sensors (Orientation + 6DOF Spatial Position + Audio)
       const { orientation, position, audio } = sensorManager.update();
 
+      // Camera rotation: Euler order YXZ (Yaw, Pitch, Roll)
       camera.rotation.order = 'YXZ';
       camera.rotation.y = orientation.yawRad;
       camera.rotation.x = orientation.pitchRad;
       camera.rotation.z = orientation.rollRad;
 
+      // Camera spatial translation
       camera.position.set(position.x, position.y, position.z);
       camera.updateMatrixWorld();
 
       const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
 
       if (stateRef.current.isPlaying) {
-        // Boss scream mechanic
+        // --- Boss scream mechanic in Level 3 ---
         if (stateRef.current.currentLevel === 3 && bossInstance && !bossInstance.isDead) {
           if (audio.isScreaming) {
             accumulatedScreamTime += delta;
@@ -631,6 +575,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             if (accumulatedScreamTime >= 10) {
               bossInstance.kill();
               particles.emitSplat(bossInstance.group.position, true);
+              buzzManager.stopMosquitoBuzz(bossInstance.id);
               buzzManager.playVictorySfx();
               sensorManager.triggerHaptic('victory');
               onLevelCompleteRef.current();
@@ -643,69 +588,83 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         let minDistance = Infinity;
         let closestRelPos: THREE.Vector3 | null = null;
         let isAimingNear = false;
+        let activeExitIndicator: EdgeIndicatorInfo | null = null;
 
         const targetConeDot = Math.cos((14 * Math.PI) / 180);
 
-        // SISTEMA DIRECTOR:
-        // Asegura que siempre haya juego (mínimo minActive = 4, máximo maxActive = 6).
-        // Respawn sólo en nidos fuera del campo de visión (ángulo > 50° respecto a camForward)
-        // para que ningún mosquito aparezca o se materialice en la vista del jugador.
-        let aliveMosquitoes = mosquitoes.filter((m) => !m.isDead);
-        let aliveCount = aliveMosquitoes.length;
-
-        if (aliveCount < CONFIG.nests.maxActive) {
-          const isBelowMin = aliveCount < CONFIG.nests.minActive;
-          const deadMosquitoes = mosquitoes.filter((m) => m.isDead);
-
-          for (const deadMos of deadMosquitoes) {
-            const timeSinceDeath = now - deadMos.deathTime;
-            // Espera mínima de 1.5s tras morir
-            if (timeSinceDeath < CONFIG.nests.respawnDelaySec * 1000) continue;
-
-            // Nido fuera del campo de visión (ángulo > 50° respecto al forward de la cámara)
-            const dirToNest = deadMos.nestPosition.clone().sub(cameraPos).normalize();
-            const angleToCamDeg = (camForward.angleTo(dirToNest) * 180) / Math.PI;
-
-            if (angleToCamDeg > 50 || (isBelowMin && timeSinceDeath > 3500)) {
-              deadMos.respawnAtNest();
-              aliveCount++;
-              if (aliveCount >= CONFIG.nests.maxActive) break;
-            }
-          }
-        }
-
-        // Actualizar todos los mosquitos activos
+        // Update all mosquitoes
         for (let i = 0; i < mosquitoes.length; i++) {
           const mos = mosquitoes[i];
-          if (!mos.isDead) {
-            mos.update(delta, now * 0.001, cameraPos, camForward);
 
-            const dist = mos.group.position.distanceTo(cameraPos);
-            if (dist < minDistance && mos.group.visible) {
+          if (mos.isDead) {
+            mos.update(
+              delta,
+              now * 0.001,
+              cameraPos,
+              audio.volume,
+              cameraMatrixInverse,
+              camera.aspect
+            );
+
+            if (now - mos.deathTime > CONFIG.combat.respawnDelaySec * 1000) {
+              mos.respawnAtNest();
+            }
+          } else {
+            mos.update(
+              delta,
+              now * 0.001,
+              cameraPos,
+              audio.volume,
+              cameraMatrixInverse,
+              camera.aspect
+            );
+
+            // Calculate spatial audio position relative to camera view
+            const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
+            const dist = relPos.length();
+            const speedRatio = mos.currentSpeed / (mos.baseSpeed || 1.6);
+            buzzManager.updateMosquitoBuzz(
+              mos.id,
+              relPos.x,
+              relPos.y,
+              relPos.z,
+              mos.isBoss,
+              1.0,
+              speedRatio
+            );
+
+            if (dist < minDistance) {
               minDistance = dist;
-              closestRelPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
+              closestRelPos = relPos;
             }
 
-            // Detección de puntería para haptic feedback
+            // Aiming detection: check if camera aims near mosquito
             const dirToMos = mos.group.position.clone().sub(cameraPos).normalize();
             const dot = camForward.dot(dirToMos);
-            if (dot > targetConeDot && dist < 6.0 && mos.group.visible) {
+            if (dot > targetConeDot && dist < 6.5) {
               isAimingNear = true;
             }
           }
         }
 
-        // Haptic feedback suave al apuntar
+        // Haptic feedback when aiming at a mosquito
         if (isAimingNear && navigator.vibrate && now - lastVibrateTime > 400) {
           try {
             navigator.vibrate(25);
           } catch {
-            // Ignorado si el navegador bloquea vibración
+            // Ignored if browser prevents vibration
           }
           lastVibrateTime = now;
         }
 
-        // Radar guidance (solo si el HUD lo necesitara)
+        // Emit edge indicator update
+        onEdgeIndicatorUpdateRef.current?.(activeExitIndicator);
+
+        // Proximity heat calculation
+        const proximityHeat = THREE.MathUtils.clamp((6.5 - minDistance) / 4.8, 0, 1);
+        onProximityHeatUpdateRef.current?.(proximityHeat, isAimingNear);
+
+        // Radar guidance
         if (closestRelPos && minDistance < 15) {
           const horizAngle = Math.atan2(closestRelPos.x, -closestRelPos.z) * (180 / Math.PI);
           let dir: 'center' | 'left' | 'right' | 'behind' = 'center';
@@ -723,31 +682,31 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           onNearestMosquitoUpdateRef.current?.(null);
         }
 
-        // Debug info update
-        if (CONFIG.showDebug) {
-          debugUpdateThrottle += delta;
-          if (debugUpdateThrottle > 0.1) {
-            debugUpdateThrottle = 0;
-            const debugList: DebugNestInfo[] = nests.map((nest) => {
-              const nestMos = mosquitoes.filter((m) => m.nestId === nest.id);
-              const alive = nestMos.filter((m) => !m.isDead).length;
-              const distToCam = nest.position.distanceTo(cameraPos);
-              return {
-                id: nest.id,
-                x: parseFloat(nest.position.x.toFixed(1)),
-                y: parseFloat(nest.position.y.toFixed(1)),
-                z: parseFloat(nest.position.z.toFixed(1)),
-                distance: parseFloat(distToCam.toFixed(1)),
-                mosquitoCount: nestMos.length,
-                aliveCount: alive,
-              };
-            });
-            onDebugUpdateRef.current?.(debugList);
-          }
+        // Periodic debug update
+        debugUpdateThrottle += delta;
+        if (debugUpdateThrottle > 0.1) {
+          debugUpdateThrottle = 0;
+          const debugList: DebugNestInfo[] = nests.map((nest) => {
+            const nestMos = mosquitoes.filter((m) => m.nestId === nest.id);
+            const alive = nestMos.filter((m) => !m.isDead).length;
+            const distToCam = nest.position.distanceTo(cameraPos);
+            return {
+              id: nest.id,
+              x: parseFloat(nest.position.x.toFixed(1)),
+              y: parseFloat(nest.position.y.toFixed(1)),
+              z: parseFloat(nest.position.z.toFixed(1)),
+              distance: parseFloat(distToCam.toFixed(1)),
+              mosquitoCount: nestMos.length,
+              aliveCount: alive,
+            };
+          });
+          onDebugUpdateRef.current?.(debugList);
         }
       } else {
         buzzManager.stopAll();
         onNearestMosquitoUpdateRef.current?.(null);
+        onProximityHeatUpdateRef.current?.(0, false);
+        onEdgeIndicatorUpdateRef.current?.(null);
       }
 
       particles.update(delta, audio.volume);
@@ -756,6 +715,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
     animationFrameId = requestAnimationFrame(animate);
 
+    // --- Cleanup ---
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('pointerdown', onPointerDown as unknown as EventListener);
