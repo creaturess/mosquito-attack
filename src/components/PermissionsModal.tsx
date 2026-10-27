@@ -117,7 +117,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
           <div className="my-4 w-full rounded-2xl border border-slate-800 bg-slate-950/70 p-3.5 text-left text-xs space-y-2 text-slate-300">
             <div className="flex items-center gap-2.5">
               <Camera className="h-4 w-4 shrink-0 text-rose-400" />
-              <span><strong>Cámara de tu entorno:</strong> Vuelan en tu espacio real.</span>
+              <span><strong>Cámara Delantera:</strong> Vuelan frente a ti usando tu cámara frontal.</span>
             </div>
             <div className="flex items-center gap-2.5">
               <Compass className="h-4 w-4 shrink-0 text-cyan-400" />
@@ -145,7 +145,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
               ) : (
                 <>
                   <Play className="h-5 w-5 fill-white" />
-                  <span>INICIAR EXPERIENCIA (CÁMARA + AR)</span>
+                  <span>INICIAR CON CÁMARA DELANTERA</span>
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </>
               )}
@@ -157,7 +157,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ onPermission
               className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 hover:text-white active:scale-95"
             >
               <Smartphone className="h-4 w-4 text-cyan-400" />
-              <span>JUGAR DIRECTO (SIN CÁMARA / MODO TÁCTIL)</span>
+              <span>JUGAR EN HABITACIÓN 3D (SIN CÁMARA)</span>
             </button>
 
             {/* If requesting takes time, show skip link */}

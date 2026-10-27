@@ -10,11 +10,11 @@ export const GAMEPLAY_CONFIG = {
   // 1. VISIBILIDAD, OPACIDAD Y TAMAÑO
   // ==========================================
   visibility: {
-    /** Distancia máxima en metros donde el mosquito empieza a ser visible (> 9.0m no es visible) */
-    maxVisibleDistance: 9.2,
+    /** Distancia máxima en metros donde el mosquito es visible */
+    maxVisibleDistance: 99.0,
 
-    /** Distancia en metros donde el mosquito alcanza OPACIDAD COMPLETA 1.0 (sólido total) */
-    fullOpacityDistance: 7.0,
+    /** Distancia en metros para opacidad 100% (siempre 1.0 sólido a toda distancia) */
+    fullOpacityDistance: 99.0,
 
     /** Escala base del modelo 3D (aumentado para que se vea claro a 5m-7.5m y ocupe 60-90px) */
     baseScale: 3.4,

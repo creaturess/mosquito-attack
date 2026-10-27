@@ -469,7 +469,7 @@ export class SensorManager {
   }
 
   /**
-   * Request and initialize Rear Camera strictly (environment / back camera)
+   * Request and initialize Front Camera (user / selfie camera)
    */
   public async requestRearCamera(): Promise<MediaStream | null> {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -496,10 +496,10 @@ export class SensorManager {
     }
 
     try {
-      // 1. Primary preference: rear camera with timeout protection
+      // 1. Primary preference: front camera (facingMode: 'user') with timeout protection
       const camPromise = navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: 'environment' },
+          facingMode: { ideal: 'user' },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
@@ -517,11 +517,11 @@ export class SensorManager {
       }
       throw new Error('Camera primary request timeout');
     } catch (err) {
-      console.warn('Initial rear camera request error, trying simplified environment constraints:', err);
+      console.warn('Initial front camera request error, trying simplified user constraints:', err);
       try {
-        // 2. Fallback: simplified environment facingMode
+        // 2. Fallback: simplified user facingMode
         const fallbackPromise = navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
+          video: { facingMode: 'user' },
           audio: false,
         });
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));

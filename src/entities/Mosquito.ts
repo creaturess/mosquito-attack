@@ -128,13 +128,13 @@ export class Mosquito {
     this.group.position.copy(this.nestPosition);
 
     // --- High-Contrast Materials with Clean Light Outline ---
-    // Dark body with subtle metallic reflection
+    // Dark body with subtle metallic reflection (100% Sólido)
     const bodyMat = new THREE.MeshStandardMaterial({
       color: this.isBoss ? 0x2b0615 : 0x141619,
       roughness: 0.45,
       metalness: 0.15,
-      transparent: true,
-      opacity: 0.0,
+      transparent: false,
+      opacity: 1.0,
     });
     this.materials.push(bodyMat);
 
@@ -142,32 +142,32 @@ export class Mosquito {
     const outlineMat = new THREE.MeshBasicMaterial({
       color: cfg.visibility.outlineColor,
       side: THREE.BackSide,
-      transparent: true,
-      opacity: 0.0,
+      transparent: false,
+      opacity: 1.0,
     });
     this.materials.push(outlineMat);
 
     // Bright glowing compound eyes
     const eyeMat = new THREE.MeshBasicMaterial({
       color: this.isBoss ? 0xff0055 : 0xff2200,
-      transparent: true,
-      opacity: 0.0,
+      transparent: false,
+      opacity: 1.0,
     });
     this.materials.push(eyeMat);
 
-    // Visible translucent wings
+    // Visible wings
     const wingMat = new THREE.MeshBasicMaterial({
       color: this.isBoss ? 0xf472b6 : 0xdbeafe,
-      transparent: true,
-      opacity: 0.0,
       side: THREE.DoubleSide,
+      transparent: false,
+      opacity: 1.0,
     });
     this.materials.push(wingMat);
 
     const needleMat = new THREE.MeshBasicMaterial({
       color: 0x09090b,
-      transparent: true,
-      opacity: 0.0,
+      transparent: false,
+      opacity: 1.0,
     });
     this.materials.push(needleMat);
 
@@ -429,24 +429,12 @@ export class Mosquito {
     this.leftWing.rotation.z = flap;
     this.rightWing.rotation.z = -flap;
 
-    // --- 6. OPACITY & VISIBILITY (PROBLEM 1 FIX) ---
-    // Full opacity 1.0 at <= 4m; smooth fade-in between 6m and 4m; 0.0 beyond 6m
-    const maxVisDist = cfg.visibility.maxVisibleDistance; // 6.0m
-    const fullOpDist = cfg.visibility.fullOpacityDistance; // 4.0m
-
-    let targetOpacity = 0.0;
-    if (distToCamera <= fullOpDist) {
-      targetOpacity = 1.0; // 100% SÓLIDO
-    } else if (distToCamera < maxVisDist) {
-      targetOpacity = (maxVisDist - distToCamera) / (maxVisDist - fullOpDist);
-    }
-
-    this.currentOpacity = Math.max(0.0, Math.min(1.0, targetOpacity));
+    // --- 6. OPACITY & VISIBILITY: 100% OPACIDAD TOTAL SIEMPRE ---
+    this.currentOpacity = 1.0;
 
     for (const mat of this.materials) {
-      mat.opacity = this.currentOpacity;
-      // When at full opacity, disable alpha blending overhead
-      mat.transparent = this.currentOpacity < 0.999;
+      mat.opacity = 1.0;
+      mat.transparent = false;
     }
 
     // Guaranteed minimum size clamp: scale between minScaleFactor (0.75) and 1.0

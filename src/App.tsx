@@ -240,7 +240,7 @@ export default function App() {
             cameraStream ? 'opacity-100' : 'opacity-0'
           }`}
           style={{
-            transform: 'translateZ(0)',
+            transform: 'scaleX(-1) translateZ(0)',
             backfaceVisibility: 'hidden',
           }}
         />
