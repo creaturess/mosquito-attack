@@ -144,16 +144,11 @@ export default function App() {
     setActiveModal('game_over');
   };
 
-  // Called when user finishes permissions setup
-  const handlePermissionsCompleted = (stream: MediaStream | null) => {
+  // Called when user finishes permissions setup with front camera
+  const handlePermissionsCompleted = (stream: MediaStream) => {
     setShowPermissionsModal(false);
-    if (stream) {
-      setCameraStream(stream);
-      setGameState((prev) => ({ ...prev, isARMode: true }));
-    } else {
-      setCameraStream(null);
-      setGameState((prev) => ({ ...prev, isARMode: false }));
-    }
+    setCameraStream(stream);
+    setGameState((prev) => ({ ...prev, isARMode: true }));
     // Show Level 1 briefing
     setActiveModal('level_start');
   };

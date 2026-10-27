@@ -15,7 +15,6 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Mosquito } from '../entities/Mosquito';
 import { ParticleSystem } from '../entities/ParticleSystem';
-import { RoomEnvironment } from '../entities/RoomEnvironment';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
@@ -164,13 +163,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     flashlight.target.position.set(0, 0, -1);
     camera.add(flashlight.target);
     scene.add(camera);
-
-    // --- 2.5 Modern Gaming Bedroom Environment (Non-Camera Mode) ---
-    const room = new RoomEnvironment();
-    room.group.scale.set(1.85, 1.85, 1.85);
-    room.group.position.set(0, 0, 0);
-    room.group.visible = !stateRef.current.isARMode;
-    scene.add(room.group);
 
     // --- 3. Particle System ---
     const particles = new ParticleSystem();
@@ -743,13 +735,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         onEdgeIndicatorUpdateRef.current?.(null);
       }
 
-      const isAR = !!stateRef.current.isARMode;
-      room.group.visible = !isAR;
-      if (isAR) {
-        renderer.setClearColor(0x000000, 0);
-      } else {
-        renderer.setClearColor(0x0a0e1a, 1.0);
-      }
+      renderer.setClearColor(0x000000, 0);
 
       particles.update(delta, audio.volume);
       renderer.render(scene, camera);
@@ -768,7 +754,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       window.removeEventListener('resize', handleResize);
       clearMosquitoes();
       buzzManager.stopAll();
-      scene.remove(room.group);
       renderer.dispose();
     };
   }, []);

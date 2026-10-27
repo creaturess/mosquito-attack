@@ -469,9 +469,10 @@ export class SensorManager {
   }
 
   /**
-   * Request and initialize Front Camera (user / selfie camera)
+   * Request and initialize Front Camera (selfie / user-facing camera)
+   * Only front camera is permitted.
    */
-  public async requestRearCamera(): Promise<MediaStream | null> {
+  public async requestFrontCamera(): Promise<MediaStream | null> {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       console.warn('Camera not supported in this browser/context');
       this.status.cameraAllowed = false;
@@ -496,17 +497,17 @@ export class SensorManager {
     }
 
     try {
-      // 1. Primary preference: front camera (facingMode: 'user') with timeout protection
+      // 1. Strict front camera request (facingMode: 'user')
       const camPromise = navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'user' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
         audio: false,
       });
 
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
       const res = await Promise.race([camPromise, timeoutPromise]);
 
       if (res) {
@@ -515,16 +516,16 @@ export class SensorManager {
         this.status.cameraActive = true;
         return this.cameraStream;
       }
-      throw new Error('Camera primary request timeout');
+      throw new Error('Front camera primary request timeout');
     } catch (err) {
-      console.warn('Initial front camera request error, trying simplified user constraints:', err);
+      console.warn('Initial front camera request error, trying basic user facingMode:', err);
       try {
-        // 2. Fallback: simplified user facingMode
+        // 2. Fallback: simple facingMode 'user'
         const fallbackPromise = navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user' },
           audio: false,
         });
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
         const res = await Promise.race([fallbackPromise, timeoutPromise]);
 
         if (res) {
@@ -533,41 +534,28 @@ export class SensorManager {
           this.status.cameraActive = true;
           return this.cameraStream;
         }
-        throw new Error('Camera fallback request timeout');
+        throw new Error('Front camera fallback request timeout');
       } catch (fallbackErr) {
-        console.warn('Fallback environment camera also failed, trying basic video:', fallbackErr);
-        try {
-          const basicPromise = navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false,
-          });
-          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
-          const res = await Promise.race([basicPromise, timeoutPromise]);
-
-          if (res) {
-            this.cameraStream = res;
-            this.status.cameraAllowed = true;
-            this.status.cameraActive = true;
-            return this.cameraStream;
-          }
-          this.status.cameraAllowed = false;
-          this.status.cameraActive = false;
-          return null;
-        } catch (finalErr) {
-          console.warn('All camera attempts failed or denied:', finalErr);
-          this.status.cameraAllowed = false;
-          this.status.cameraActive = false;
-          return null;
-        }
+        console.warn('Front camera request failed or denied:', fallbackErr);
+        this.status.cameraAllowed = false;
+        this.status.cameraActive = false;
+        return null;
       }
     }
   }
 
   /**
-   * Request camera and return an HTMLVideoElement (strictly rear camera)
+   * Alias for backward compatibility - points to requestFrontCamera
+   */
+  public async requestRearCamera(): Promise<MediaStream | null> {
+    return this.requestFrontCamera();
+  }
+
+  /**
+   * Request camera and return an HTMLVideoElement (strictly front camera)
    */
   public async requestCamera(): Promise<HTMLVideoElement | null> {
-    const stream = await this.requestRearCamera();
+    const stream = await this.requestFrontCamera();
     if (!stream) return null;
 
     if (!this.videoElement) {
