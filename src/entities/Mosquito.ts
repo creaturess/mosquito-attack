@@ -1,19 +1,20 @@
 /**
  * Mosquito.ts
- * 3D Mosquito entity with:
- * - 100% solid opacity ALWAYS (transparent = false, opacity = 1, depthWrite = true, depthTest = true)
- * - No distance opacity fade! Instead, distance scaling (0.6x to 1.0x between 9m and 6m; invisible > 9m)
- * - Unique, cloned materials per instance (no shared material bugs)
- * - Single physical steering system (seek wanderTarget, maxSpeed 1.2 m/s, maxAcceleration 2 m/s², maxTurnRate 90°/s)
- * - Arc/figure-eight patrolling in 2m radius around nest, new target <= 70° from current direction
- * - Occasional hovering/perching pauses (0.5s - 1.2s) for player to aim
- * - Screen angular velocity capped to <= 40°/s
- * - Smooth camera evasion (< 3.0m)
- * - Generous ~0.48m hitbox sphere
+ * 3D Mosquito entity:
+ * - 100% solid opacity ALWAYS, visible = true ALWAYS while alive
+ * - Frustum culling disabled on all meshes to prevent disappearing at screen edges
+ * - Soft camera evasion ONLY if < 1.5m (smooth force, no jumps)
+ * - Single steering physics (maxSpeed 1.0m/s, maxAcceleration 1.8m/s², maxTurnRate 100°/s)
+ * - Patrols in 1.5m radius around nest with smooth arcs (<= 70° from current heading)
+ * - Leash to nest: curves back if > 2.2m from nest
+ * - Hover/perch pauses of 0.6s to 1.2s every 4s to 7s for aiming
+ * - Attached THREE.PositionalAudio instance that plays continuously while alive
+ * - Generous ~0.5m hitbox
  */
 
 import * as THREE from 'three';
 import { CONFIG } from '../config/gameplayConfig';
+import { buzzManager } from '../audio/SpatialBuzzManager';
 
 export interface MosquitoOptions {
   id: string;
@@ -43,31 +44,28 @@ export class Mosquito {
   public acceleration: THREE.Vector3 = new THREE.Vector3();
   private prevVelocity: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
 
-  // Wings & hit detection
+  // Wings & meshes
   private leftWing: THREE.Mesh;
   private rightWing: THREE.Mesh;
   public hitSphere: THREE.Mesh;
 
-  // Speeds & dynamics
+  // Dedicated 3D Audio
+  public audio?: THREE.PositionalAudio;
+  public audioFilter?: BiquadFilterNode;
+
+  // Dynamics & speeds
   public baseSpeed: number;
   public currentSpeed: number;
   private flapSpeed: number;
   private timeOffset: number;
   public baseScale: number;
 
-  // Pausing / Hovering mechanic (perch/hover for 0.5s - 1.2s to facilitate aiming)
+  // Pausing / Hovering mechanic (perch/hover for 0.6s - 1.2s every 4s - 7s)
   private pauseTimer: number = 0;
-  private nextPauseInterval: number = 6.0;
-  private isPaused: boolean = false;
+  private nextPauseInterval: number = 5.0;
+  public isPaused: boolean = false;
   private pauseDuration: number = 0.8;
   private pauseProgress: number = 0;
-
-  // Zigzag pulses (brief, infrequent, amplitude < 0.4m)
-  private zigzagTimer: number = 0;
-  private nextZigzagInterval: number = 9.0;
-  private isZigzagging: boolean = false;
-  private zigzagProgress: number = 0;
-  private zigzagForce: THREE.Vector3 = new THREE.Vector3();
 
   constructor(options: MosquitoOptions) {
     this.id = options.id;
@@ -77,26 +75,26 @@ export class Mosquito {
     this.isBoss = !!options.isBoss;
     this.level = options.level || 1;
 
-    this.baseSpeed = this.isBoss ? 0.8 : CONFIG.physics.maxSpeed;
+    this.baseSpeed = this.isBoss ? 0.75 : CONFIG.physics.maxSpeed;
     this.currentSpeed = this.baseSpeed;
     this.baseScale = options.scale || (this.isBoss ? CONFIG.visibility.bossScale : CONFIG.visibility.baseScale);
-    this.flapSpeed = this.isBoss ? 24 : this.level === 1 ? 38 : 48;
+    this.flapSpeed = this.isBoss ? 24 : this.level === 1 ? 38 : 46;
     this.timeOffset = Math.random() * 100;
 
     this.group = new THREE.Group();
     this.group.position.copy(this.nestPosition);
     this.group.renderOrder = 10;
+    this.group.frustumCulled = false; // Never disappear at screen edges
 
     // Initial heading & velocity
     const initAngle = Math.random() * Math.PI * 2;
     this.velocity.set(Math.cos(initAngle) * 0.4, 0, Math.sin(initAngle) * 0.4);
     this.prevVelocity.copy(this.velocity).normalize();
 
-    // Pick first target inside nest patrol area
+    // Pick first target inside nest zone
     this.pickNewWanderTarget();
 
-    // --- REGLA 2: OPACIDAD 100% SIEMPRE. NADA DE TRANSPARENCIA ---
-    // Cada mosquito tiene sus propios materiales (.clone() / fresh)
+    // --- 100% SOLID MATERIALS (NO TRANSPARENCY) ---
     const bodyMat = new THREE.MeshStandardMaterial({
       color: this.isBoss ? 0x220510 : CONFIG.visibility.bodyColor,
       roughness: 0.5,
@@ -108,7 +106,6 @@ export class Mosquito {
       blending: THREE.NormalBlending,
     });
 
-    // Reborde / Outline claro fino para contraste sobre fondos claros y oscuros
     const outlineMat = new THREE.MeshBasicMaterial({
       color: CONFIG.visibility.outlineColor,
       side: THREE.BackSide,
@@ -145,41 +142,46 @@ export class Mosquito {
       depthTest: true,
     });
 
-    // --- Geometría 3D sólida y contrastada ---
-    // 1. Abdomen ovalado
+    // --- 3D Solid Geometry with Frustum Culling Disabled ---
+    // 1. Abdomen
     const abdomenGeo = new THREE.ConeGeometry(0.2, 0.95, 8);
     abdomenGeo.rotateX(Math.PI / 2);
     const abdomen = new THREE.Mesh(abdomenGeo, bodyMat.clone());
     abdomen.position.set(0, 0, 0.48);
     abdomen.renderOrder = 10;
+    abdomen.frustumCulled = false;
     this.group.add(abdomen);
 
-    // Outline abdomen
+    // Abdomen rim outline
     const abdomenOutline = new THREE.Mesh(abdomenGeo, outlineMat.clone());
     abdomenOutline.scale.set(1.12, 1.08, 1.12);
     abdomenOutline.position.copy(abdomen.position);
     abdomenOutline.renderOrder = 9;
+    abdomenOutline.frustumCulled = false;
     this.group.add(abdomenOutline);
 
-    // 2. Tórax
+    // 2. Thorax
     const thoraxGeo = new THREE.SphereGeometry(0.26, 8, 8);
     const thorax = new THREE.Mesh(thoraxGeo, bodyMat.clone());
     thorax.renderOrder = 10;
+    thorax.frustumCulled = false;
     this.group.add(thorax);
 
     const thoraxOutline = new THREE.Mesh(thoraxGeo, outlineMat.clone());
     thoraxOutline.scale.setScalar(1.14);
     thoraxOutline.renderOrder = 9;
+    thoraxOutline.frustumCulled = false;
     this.group.add(thoraxOutline);
 
-    // 3. Cabeza
+    // 3. Head
     const headGeo = new THREE.SphereGeometry(0.18, 8, 8);
     const head = new THREE.Mesh(headGeo, bodyMat.clone());
     head.position.set(0, 0.05, -0.34);
     head.renderOrder = 10;
+    head.frustumCulled = false;
     this.group.add(head);
 
-    // 4. Ojos rojos contrastados
+    // 4. Eyes
     const eyeGeo = new THREE.SphereGeometry(0.08, 6, 6);
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat.clone());
     leftEye.position.set(-0.1, 0.1, -0.4);
@@ -187,17 +189,20 @@ export class Mosquito {
     rightEye.position.set(0.1, 0.1, -0.4);
     leftEye.renderOrder = 10;
     rightEye.renderOrder = 10;
+    leftEye.frustumCulled = false;
+    rightEye.frustumCulled = false;
     this.group.add(leftEye, rightEye);
 
-    // 5. Probóscide / Aguijón
+    // 5. Proboscis
     const needleGeo = new THREE.CylinderGeometry(0.02, 0.038, 0.5, 5);
     needleGeo.rotateX(Math.PI / 3);
     const needle = new THREE.Mesh(needleGeo, needleMat.clone());
     needle.position.set(0, -0.16, -0.54);
     needle.renderOrder = 10;
+    needle.frustumCulled = false;
     this.group.add(needle);
 
-    // 6. Alas sólidas y nítidas
+    // 6. Wings
     const wingGeo = new THREE.PlaneGeometry(0.32, 0.95);
     wingGeo.translate(0, 0.48, 0);
     wingGeo.rotateX(Math.PI / 2);
@@ -206,15 +211,17 @@ export class Mosquito {
     this.leftWing.position.set(-0.14, 0.2, -0.05);
     this.leftWing.rotation.y = 0.45;
     this.leftWing.renderOrder = 10;
+    this.leftWing.frustumCulled = false;
 
     this.rightWing = new THREE.Mesh(wingGeo, wingMat.clone());
     this.rightWing.position.set(0.14, 0.2, -0.05);
     this.rightWing.rotation.y = -0.45;
     this.rightWing.renderOrder = 10;
+    this.rightWing.frustumCulled = false;
 
     this.group.add(this.leftWing, this.rightWing);
 
-    // 7. Patas
+    // 7. Legs
     for (let i = -1; i <= 1; i++) {
       const legGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.7, 3);
       const lLeg = new THREE.Mesh(legGeo, needleMat.clone());
@@ -222,42 +229,67 @@ export class Mosquito {
       lLeg.rotation.z = 0.8;
       lLeg.rotation.x = i * 0.3;
       lLeg.renderOrder = 10;
+      lLeg.frustumCulled = false;
 
       const rLeg = new THREE.Mesh(legGeo, needleMat.clone());
       rLeg.position.set(0.28, -0.22, i * 0.2);
       rLeg.rotation.z = -0.8;
       rLeg.rotation.x = i * 0.3;
       rLeg.renderOrder = 10;
+      rLeg.frustumCulled = false;
 
       this.group.add(lLeg, rLeg);
     }
 
-    // 8. Hitbox generosa de golpe (~0.48m de radio)
+    // 8. Hitbox generosa (~0.5m de radio)
     const hitRadius = this.isBoss ? 1.6 : CONFIG.combat.hitboxRadius;
     const hitGeo = new THREE.SphereGeometry(hitRadius, 6, 6);
     const hitSphereMat = new THREE.MeshBasicMaterial({ visible: false });
     this.hitSphere = new THREE.Mesh(hitGeo, hitSphereMat);
     this.hitSphere.userData = { mosquitoId: this.id, isBoss: this.isBoss };
+    this.hitSphere.frustumCulled = false;
     this.group.add(this.hitSphere);
 
-    // Initial scale
+    // Apply scale once (always solid, no distance shrinking)
     this.group.scale.setScalar(this.baseScale);
+
+    // Attach Positional Audio
+    const audioSetup = buzzManager.attachMosquitoAudio(this.group, this.isBoss);
+    if (audioSetup) {
+      this.audio = audioSetup.audio;
+      this.audioFilter = audioSetup.filter;
+      // Start buzzing
+      this.audio.setLoop(true);
+      if (!this.audio.isPlaying) {
+        this.audio.play();
+      }
+    }
   }
 
   /**
-   * Genera un nuevo objetivo de patrulla en un radio de 2m alrededor del nido.
-   * El nuevo objetivo forma como máximo 70° con la dirección actual (evita giros en U).
+   * Genera un nuevo objetivo de patrulla en un radio de 1.5m alrededor del nido.
+   * Si está a más de 2.2m del nido, fuerza que el objetivo vuelva suavemente hacia el nido.
    */
   public pickNewWanderTarget() {
+    const distToNest = this.group.position.distanceTo(this.nestPosition);
+
+    // Si se alejó demasiado del nido (> 2.2m), el siguiente objetivo vuelve hacia el nido
+    if (distToNest > CONFIG.nests.leashRadius) {
+      const dirBackToNest = this.nestPosition.clone().sub(this.group.position).normalize();
+      const returnDist = 1.0 + Math.random() * 0.5;
+      this.wanderTarget.copy(this.group.position).addScaledVector(dirBackToNest, returnDist);
+      return;
+    }
+
     const radius = CONFIG.nests.patrolRadius;
     const currentHeading = this.velocity.lengthSq() > 0.001
       ? this.velocity.clone().normalize()
       : new THREE.Vector3(0, 0, -1);
 
-    // Ángulo máximo de 70° respecto a la dirección actual
+    // Ángulo máximo de 70° respecto a la dirección actual (sin giros en U)
     const maxAngleRad = (CONFIG.physics.maxHeadingAngleDeg * Math.PI) / 180;
     const yawOffset = (Math.random() - 0.5) * 2 * maxAngleRad;
-    const pitchOffset = (Math.random() - 0.5) * 0.45;
+    const pitchOffset = (Math.random() - 0.5) * 0.35;
 
     const candidateDir = currentHeading
       .clone()
@@ -265,32 +297,29 @@ export class Mosquito {
     candidateDir.y += pitchOffset;
     candidateDir.normalize();
 
-    // Distancia suave de patrullaje
-    const candidateDist = 0.8 + Math.random() * (radius - 0.8);
+    const candidateDist = 0.6 + Math.random() * (radius - 0.4);
     const candidatePos = this.nestPosition
       .clone()
       .add(candidateDir.multiplyScalar(candidateDist));
 
-    // Mantener dentro del sobre vertical del nido
+    // Mantener dentro del rango de altura del nido
     candidatePos.y = THREE.MathUtils.clamp(
       candidatePos.y,
-      this.nestPosition.y - 0.7,
-      this.nestPosition.y + 0.7
+      this.nestPosition.y - 0.5,
+      this.nestPosition.y + 0.5
     );
 
     this.wanderTarget.copy(candidatePos);
   }
 
   /**
-   * Actualización física del vuelo (steering único, sin opacidades)
+   * Actualización física del vuelo (steering suave continuo, sin saltos ni desaparición)
    */
   public update(
     delta: number,
     elapsedTime: number,
     playerPos: THREE.Vector3,
-    reactiveAudioLevel: number = 0,
-    cameraMatrixInverse?: THREE.Matrix4,
-    cameraAspect: number = 1.0
+    camForward?: THREE.Vector3
   ) {
     // DeltaTime clamp (máximo 0.05s)
     const dt = Math.min(delta, 0.05);
@@ -298,37 +327,13 @@ export class Mosquito {
     if (this.isDead) {
       this.group.position.y -= dt * 3.5;
       this.group.rotation.x += dt * 5;
-      this.group.scale.multiplyScalar(0.96);
       return;
     }
 
-    const dCam = this.group.position.distanceTo(playerPos);
+    // SIEMPRE visible mientras esté vivo (nunca ocultar por distancia ni tiempo)
+    this.group.visible = true;
 
-    // --- REGLA 2: ESCALADO ENTRE 9m y 6m (OPACIDAD SIEMPRE 1.0) ---
-    // Si d > 9m: mosquito.visible = false
-    // Si d <= 9m: crece suavemente de 0.6 a 1.0 entre 9m y 6m
-    if (dCam > CONFIG.visibility.maxVisibleDistance) {
-      this.group.visible = false;
-      return;
-    } else {
-      this.group.visible = true;
-      const t = THREE.MathUtils.clamp(
-        (CONFIG.visibility.maxVisibleDistance - dCam) /
-          (CONFIG.visibility.maxVisibleDistance - CONFIG.visibility.fullScaleDistance),
-        0.0,
-        1.0
-      );
-      // Interpolación suave Hermite
-      const smoothT = t * t * (3.0 - 2.0 * t);
-      const scaleFactor = THREE.MathUtils.lerp(
-        CONFIG.visibility.minScaleRatio,
-        1.0,
-        smoothT
-      );
-      this.group.scale.setScalar(this.baseScale * scaleFactor);
-    }
-
-    // --- REGLA 4: PAUSAS OCASIONALES (se posa/flota casi quieto 0.5s a 1.2s) ---
+    // --- PAUSAS DE FLOTACIÓN (0.6s a 1.2s cada 4s a 7s para poder apuntar) ---
     this.pauseTimer += dt;
     if (!this.isPaused && this.pauseTimer >= this.nextPauseInterval) {
       this.isPaused = true;
@@ -346,9 +351,9 @@ export class Mosquito {
 
     if (this.isPaused) {
       this.pauseProgress += dt;
-      // Damping fuerte durante la pausa, permitiendo leve oscilación natural
-      this.velocity.multiplyScalar(Math.pow(0.15, dt));
-      this.group.position.y += Math.sin((elapsedTime + this.timeOffset) * 4.0) * (0.002 * dt * 60);
+      // Damping fuerte durante la pausa con flotación sutil
+      this.velocity.multiplyScalar(Math.pow(0.18, dt));
+      this.group.position.y += Math.sin((elapsedTime + this.timeOffset) * 3.5) * (0.002 * dt * 60);
 
       if (this.pauseProgress >= this.pauseDuration) {
         this.isPaused = false;
@@ -359,14 +364,14 @@ export class Mosquito {
     // --- SISTEMA ÚNICO DE STEERING ---
     // 1. Llegada al objetivo
     const distToTarget = this.group.position.distanceTo(this.wanderTarget);
-    if (distToTarget < 0.5) {
+    if (distToTarget < 0.45) {
       this.pickNewWanderTarget();
     }
 
     // 2. Fuerza de Seek hacia wanderTarget
     const desired = this.wanderTarget.clone().sub(this.group.position);
     if (desired.lengthSq() > 0.0001) {
-      const targetSpd = this.isPaused ? 0.2 : this.baseSpeed;
+      const targetSpd = this.isPaused ? 0.15 : this.baseSpeed;
       desired.normalize().multiplyScalar(targetSpd);
     }
     const steer = desired.sub(this.velocity);
@@ -375,7 +380,8 @@ export class Mosquito {
     }
     this.acceleration.copy(steer);
 
-    // 3. Evasión de cámara suave (< 3.0m, NUNCA a menos de 3m)
+    // 3. Evasión suave de la cámara SOLO si está a menos de 1.5m (fuerza progresiva sin saltos)
+    const dCam = this.group.position.distanceTo(playerPos);
     if (dCam < CONFIG.physics.cameraRepelDistance) {
       const repelDir = this.group.position.clone().sub(playerPos).normalize();
       const repelForce =
@@ -383,37 +389,10 @@ export class Mosquito {
       this.acceleration.addScaledVector(repelDir, repelForce);
     }
 
-    // 4. Zigzag ocasional suave (amplitud < 0.4m, duración <= 0.3s, cada 8 a 12s)
-    this.zigzagTimer += dt;
-    if (!this.isZigzagging && this.zigzagTimer >= this.nextZigzagInterval) {
-      this.isZigzagging = true;
-      this.zigzagProgress = 0;
-      this.zigzagTimer = 0;
-      this.nextZigzagInterval =
-        CONFIG.physics.zigzagMinInterval +
-        Math.random() *
-          (CONFIG.physics.zigzagMaxInterval - CONFIG.physics.zigzagMinInterval);
-
-      const lateral = new THREE.Vector3(
-        -this.velocity.z,
-        (Math.random() - 0.5) * 0.3,
-        this.velocity.x
-      ).normalize();
-      this.zigzagForce.copy(lateral).multiplyScalar(CONFIG.physics.zigzagAmplitude * 3.0);
-    }
-
-    if (this.isZigzagging) {
-      this.zigzagProgress += dt;
-      this.acceleration.add(this.zigzagForce);
-      if (this.zigzagProgress >= CONFIG.physics.zigzagDuration) {
-        this.isZigzagging = false;
-      }
-    }
-
-    // 5. Integrar velocidad: velocity += accel * dt
+    // 4. Integrar velocidad: velocity += accel * dt
     this.velocity.addScaledVector(this.acceleration, dt);
 
-    // 6. Límite de giro (maxTurnRate = 90°/s)
+    // 5. Límite de giro (maxTurnRate = 100°/s)
     if (this.prevVelocity.lengthSq() > 0.001 && this.velocity.lengthSq() > 0.001) {
       const currentHeading = this.velocity.clone().normalize();
       const maxTurnRad = ((CONFIG.physics.maxTurnRateDeg * Math.PI) / 180) * dt;
@@ -432,64 +411,43 @@ export class Mosquito {
       }
     }
 
-    // 7. Damping suave
+    // 6. Damping suave
     const damp = Math.pow(1.0 - CONFIG.physics.dampingPerSec, dt);
     this.velocity.multiplyScalar(damp);
 
-    // 8. Límite de velocidad angular en pantalla (CONFIG.maxScreenAngularSpeed = 40°/s)
-    let isInView = false;
-    if (cameraMatrixInverse) {
-      const relCam = this.group.position.clone().applyMatrix4(cameraMatrixInverse);
-      if (relCam.z < -0.2) {
-        const fovTan = Math.tan(((35 * Math.PI) / 180));
-        const halfWidthAtZ = -relCam.z * fovTan * cameraAspect;
-        const halfHeightAtZ = -relCam.z * fovTan;
-        isInView =
-          Math.abs(relCam.x) <= halfWidthAtZ * 1.05 &&
-          Math.abs(relCam.y) <= halfHeightAtZ * 1.05;
-      }
-    }
-
-    if (isInView) {
-      const maxScreenRad = (CONFIG.physics.maxScreenAngularSpeed * Math.PI) / 180;
-      const maxLinearSpeed = Math.max(0.35, dCam * maxScreenRad);
-      if (this.velocity.length() > maxLinearSpeed) {
-        const curSpd = this.velocity.length();
-        const clampedSpd = THREE.MathUtils.lerp(curSpd, maxLinearSpeed, dt * 4.0);
-        this.velocity.setLength(clampedSpd);
-      }
-    } else {
-      if (this.velocity.length() > CONFIG.physics.maxSpeed) {
-        this.velocity.setLength(CONFIG.physics.maxSpeed);
-      }
+    // 7. Límite de velocidad máxima normal (1.0 m/s)
+    if (this.velocity.length() > CONFIG.physics.maxSpeed) {
+      this.velocity.setLength(CONFIG.physics.maxSpeed);
     }
 
     this.currentSpeed = this.velocity.length();
 
-    // 9. Actualizar posición continua: position += velocity * dt
-    // PROHIBIDO teletransportar o sumar offsets aleatorios directos
+    // 8. Actualizar posición continua: position += velocity * dt
     this.group.position.addScaledVector(this.velocity, dt);
 
-    // 10. Orientación y peralte (banking) en curvas
+    // 9. Orientación continua y peralte en curvas
     if (this.velocity.lengthSq() > 0.0001) {
       this.group.lookAt(this.group.position.clone().add(this.velocity));
-      // Inclinación leve (banking) proporcional a la aceleración lateral
-      const banking = -this.velocity.x * 0.22;
+      const banking = -this.velocity.x * 0.2;
       this.group.rotation.z = banking;
     }
 
-    // Aleteo
+    // 10. Aleteo continuo
     const flapRate = this.isPaused ? 16 : this.flapSpeed;
     const flap = Math.sin((elapsedTime + this.timeOffset) * flapRate) * 0.85;
     this.leftWing.rotation.z = flap;
     this.rightWing.rotation.z = -flap;
 
-    // Boss shake
-    if (this.isBoss && reactiveAudioLevel > 0.05) {
-      const shake = reactiveAudioLevel * 0.2;
-      this.group.position.x += (Math.random() - 0.5) * shake;
-      this.group.position.y += (Math.random() - 0.5) * shake;
-      this.group.position.z += (Math.random() - 0.5) * shake;
+    // 11. Actualizar filtro lowpass direccional del audio según el ángulo de visión
+    if (this.audioFilter && camForward) {
+      const toMos = this.group.position.clone().sub(playerPos).normalize();
+      const angleToForward = camForward.angleTo(toMos);
+      buzzManager.updateDirectivity(this.audioFilter, angleToForward);
+    }
+
+    // Garantizar que el audio siga sonando
+    if (this.audio && !this.audio.isPlaying) {
+      this.audio.play();
     }
   }
 
@@ -500,12 +458,25 @@ export class Mosquito {
     this.velocity.set(0, 0, 0);
     this.acceleration.set(0, 0, 0);
     this.group.visible = true;
+    this.isPaused = false;
+    this.pauseTimer = 0;
     this.pickNewWanderTarget();
-    this.group.scale.setScalar(this.baseScale * CONFIG.visibility.minScaleRatio);
+
+    // Reanudar zumbido
+    if (this.audio) {
+      this.audio.setLoop(true);
+      if (!this.audio.isPlaying) {
+        this.audio.play();
+      }
+    }
   }
 
   public kill() {
     this.isDead = true;
     this.deathTime = performance.now();
+    this.group.visible = false;
+    if (this.audio && this.audio.isPlaying) {
+      this.audio.stop();
+    }
   }
 }
