@@ -17,7 +17,7 @@ import { Mosquito } from '../entities/Mosquito';
 import { ParticleSystem } from '../entities/ParticleSystem';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
-import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
+import { CONFIG } from '../config/gameplayConfig';
 
 export interface GameState {
   currentLevel: 1 | 2 | 3;
@@ -170,7 +170,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
     // --- 4. Debug 3D Group ---
     const debugGroup = new THREE.Group();
-    debugGroup.visible = isDebugModeRef.current;
+    debugGroup.visible = CONFIG.showDebug && isDebugModeRef.current;
     scene.add(debugGroup);
 
     // --- 5. World Nests & Mosquito Population ---
@@ -249,7 +249,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       currentKills = 0;
       accumulatedScreamTime = 0;
       const currentLvl = stateRef.current.currentLevel;
-      const cfg = GAMEPLAY_CONFIG;
+      const cfg = CONFIG;
 
       if (currentLvl === 3) {
         // Boss level
@@ -285,7 +285,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             nestPosition: nestPos,
             nestRadius,
             scale: cfg.visibility.baseScale * 0.9,
-            speed: cfg.movement.baseSpeedLvl2,
+            speed: cfg.physics.maxSpeed,
             level: 3,
           });
           scene.add(minion.group);
@@ -322,7 +322,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             const id = `mosquito_${nextMosquitoId++}`;
             assignedIds.push(id);
             const speed =
-              currentLvl === 1 ? cfg.movement.baseSpeedLvl1 : cfg.movement.baseSpeedLvl2;
+              currentLvl === 1 ? cfg.physics.maxSpeed * 0.8 : cfg.physics.maxSpeed;
 
             const mos = new Mosquito({
               id,
@@ -388,7 +388,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
       // Screen-space proximity fallback with generous tolerance
       if (!hitTarget) {
-        let bestDistancePx = GAMEPLAY_CONFIG.trackingAid.screenTouchTolerancePx;
+        let bestDistancePx = CONFIG.combat.screenTouchTolerancePx;
         const screenPos = new THREE.Vector3();
 
         for (const mos of mosquitoes) {
@@ -539,7 +539,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         lastIsPlaying = stateRef.current.isPlaying;
       }
 
-      debugGroup.visible = isDebugModeRef.current;
+      debugGroup.visible = CONFIG.showDebug && isDebugModeRef.current;
 
       const now = performance.now();
       const delta = Math.min((now - lastTime) / 1000, 0.1);
@@ -590,9 +590,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         let isAimingNear = false;
         let activeExitIndicator: EdgeIndicatorInfo | null = null;
 
-        const targetConeDot = Math.cos(
-          (GAMEPLAY_CONFIG.trackingAid.reticleTargetConeDeg * Math.PI) / 180
-        );
+        const targetConeDot = Math.cos((14 * Math.PI) / 180);
 
         // Update all mosquitoes
         for (let i = 0; i < mosquitoes.length; i++) {
@@ -608,7 +606,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               camera.aspect
             );
 
-            if (now - mos.deathTime > GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000) {
+            if (now - mos.deathTime > CONFIG.combat.respawnDelaySec * 1000) {
               mos.respawnAtNest();
             }
           } else {
@@ -624,7 +622,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             // Calculate spatial audio position relative to camera view
             const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
             const dist = relPos.length();
-            const speedRatio = mos.currentSpeed / (mos.baseSpeed || 0.35);
+            const speedRatio = mos.currentSpeed / (mos.baseSpeed || 1.6);
             buzzManager.updateMosquitoBuzz(
               mos.id,
               relPos.x,
@@ -645,24 +643,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             const dot = camForward.dot(dirToMos);
             if (dot > targetConeDot && dist < 6.5) {
               isAimingNear = true;
-            }
-
-            // Track recent screen exit indicator (fades over 1.5s)
-            if (
-              mos.lastExitDirection &&
-              now - mos.lastExitTimestamp <
-                GAMEPLAY_CONFIG.trackingAid.edgeIndicatorDuration * 1000
-            ) {
-              const elapsed = (now - mos.lastExitTimestamp) / 1000;
-              const alpha =
-                1.0 - elapsed / GAMEPLAY_CONFIG.trackingAid.edgeIndicatorDuration;
-              if (!activeExitIndicator || alpha > activeExitIndicator.opacity) {
-                activeExitIndicator = {
-                  x: mos.lastExitDirection.x,
-                  y: mos.lastExitDirection.y,
-                  opacity: alpha,
-                };
-              }
             }
           }
         }

@@ -1,129 +1,111 @@
 /**
  * gameplayConfig.ts
  * Configuración central del juego y parámetros de jugabilidad.
- * Editá estos valores para calibrar la dificultad de seguimiento visual,
- * tamaños de mosquitos, velocidades, opacidades y tolerancias.
+ * Editá estos valores para calibrar la dificultad, física y ayudas.
  */
 
-export const GAMEPLAY_CONFIG = {
+export const CONFIG = {
   // ==========================================
-  // 1. VISIBILIDAD, OPACIDAD Y TAMAÑO (PROBLEMA 1 & 2.2)
+  // AYUDAS VISUALES Y ELEMENTOS DE INTERFAZ (PROBLEMA A)
+  // Desactivadas por defecto según las reglas
+  // ==========================================
+  showHints: false,           // Por defecto: ninguna ayuda visual o cartel
+  showDebug: false,           // Por defecto: modo debug desactivado
+  showEdgeIndicator: false,   // Por defecto: sin flechas direccionales al salir de pantalla
+  showHotColdVignette: false, // Por defecto: sin viñeta caliente/frío
+
+  // ==========================================
+  // VISIBILIDAD, OPACIDAD Y TAMAÑO (PROBLEMA B)
   // ==========================================
   visibility: {
-    /** Distancia máxima en metros donde el mosquito empieza a desvanecerse (> 6m no es visible) */
-    maxVisibleDistance: 6.0,
+    /** Distancia d >= 7.0m: opacidad 0 (invisible) */
+    invisibleDistance: 7.0,
 
-    /** Distancia en metros donde el mosquito alcanza OPACIDAD COMPLETA 1.0 (sólido total) */
-    fullOpacityDistance: 4.0,
+    /** Distancia d <= 4.5m: opacidad 1.0 exacto (100% sólido) */
+    solidDistance: 4.5,
 
-    /** Escala base del modelo 3D (aumentado para garantizar que se vea claramente) */
+    /** Escala base del mosquito 3D (garantiza tamaño visible y legible) */
     baseScale: 2.3,
+
+    /** Escala mínima garantizada para que nunca se vuelva un puntito invisible */
+    minScaleFactor: 0.8,
 
     /** Escala del jefe gigante (Nivel 3) */
     bossScale: 4.8,
 
-    /** Escala mínima garantizada (clamp) a cualquier distancia visible: evita que se vuelva un puntito */
-    minScaleFactor: 0.75,
+    /** Color de cuerpo oscuro y opaco */
+    bodyColor: 0x181a1d,
 
-    /** Grosor y brillo del reborde/silueta para contraste contra fondos oscuros y claros */
-    outlineScale: 1.12,
-    outlineColor: 0x94a3b8, // Gris claro / azul metálico de alto contraste
+    /** Reborde fino claro para contraste sobre cualquier fondo */
+    outlineColor: 0x94a3b8,
   },
 
   // ==========================================
-  // 2. VELOCIDAD Y SEGUIMIENTO VISUAL (PROBLEMA 2.1 & 2.4)
+  // FÍSICA Y STEERING DE MOVIMIENTO (PROBLEMA C)
   // ==========================================
-  movement: {
-    /** Velocidad base de vuelo en m/s en Nivel 1 */
-    baseSpeedLvl1: 0.32,
+  physics: {
+    /** Velocidad máxima en vuelo normal (m/s) */
+    maxSpeed: 1.6,
 
-    /** Velocidad base de vuelo en m/s en Nivel 2 */
-    baseSpeedLvl2: 0.42,
+    /** Aceleración máxima (m/s²) para que los cambios de dirección sean curvos */
+    maxAcceleration: 3.0,
 
-    /** Límite de velocidad angular cuando está a la vista del jugador (grados por segundo en pantalla) */
-    maxAngularSpeedDeg: 75,
+    /** Velocidad angular máxima de giro de la dirección (grados/segundo) */
+    maxTurnRateDeg: 120,
 
-    /** Factor de suavizado inercial en giros (mayor número = curvas más suaves, nunca giros secos) */
-    turnSmoothing: 2.6,
+    /** Límite de velocidad angular aparente en pantalla vista desde la cámara (grados/s) */
+    maxScreenAngularSpeed: 70,
 
-    /** Reducción de velocidad cuando el mosquito está dentro del campo de visión para facilitar el tracking */
-    inViewSpeedDamp: 0.8,
+    /** Radio de la zona del nido para elegir puntos objetivo wanderTarget (metros) */
+    nestWanderRadius: 1.5,
 
-    /** Tiempo máximo de duración de los picos de aceleración / zigzags rápidos en segundos (< 0.3s) */
-    dartDuration: 0.22,
+    /** Distancia al wanderTarget para seleccionar uno nuevo (metros) */
+    targetArrivalThreshold: 0.4,
 
-    /** Multiplicador de velocidad durante el pico de aceleración (acotado y suave) */
-    dartSpeedMultiplier: 1.5,
+    /** Distancia a la cámara para iniciar evasión suave (metros) */
+    cameraRepelDistance: 1.5,
 
-    /** Intervalo mínimo entre aceleraciones (segundos) - poco frecuentes */
-    dartMinInterval: 4.5,
+    /** Fuerza progresiva de repulsión de la cámara */
+    cameraRepelStrength: 4.5,
 
-    /** Intervalo máximo entre aceleraciones (segundos) */
-    dartMaxInterval: 7.5,
+    /** Damping de fricción por segundo (0.98 a 60fps) */
+    dampingPerSec: 0.3,
 
-    /** Tiempo (segundos) que el mosquito merodea cerca del borde al salir del encuadre */
-    screenEdgeLingerTime: 1.6,
-
-    /** Distancia de seguridad a la cámara para que nunca choque ni se pegue a la pantalla */
-    cameraRepelDistance: 1.6,
+    // Zigzags rápidos ocasionales (breves y poco frecuentes)
+    zigzagDuration: 0.22,      // Segundos (<= 0.25s)
+    zigzagMinInterval: 4.5,    // Segundos mínimos entre zigzags
+    zigzagMaxInterval: 7.5,    // Segundos máximos entre zigzags
+    zigzagStrength: 2.2,       // Fuerza lateral del zigzag
   },
 
   // ==========================================
-  // 3. ESTELA DE MOVIMIENTO / MOTION TRAIL (PROBLEMA 2.3)
+  // ESTELA DE MOVIMIENTO (MOTION TRAIL)
   // ==========================================
   trail: {
-    /** Habilitar o deshabilitar estela */
     enabled: true,
-
-    /** Cantidad de puntos en la estela */
-    maxPoints: 12,
-
-    /** Duración en segundos que tarda en desvanecerse la estela (0.3s a 0.5s) */
-    lifetimeSec: 0.42,
-
-    /** Opacidad máxima de la estela */
-    opacity: 0.65,
-
-    /** Color de la estela (cian eléctrico tenue para contraste sobre cualquier fondo) */
+    maxPoints: 10,
+    lifetimeSec: 0.38,
+    opacity: 0.45,
     color: 0x38bdf8,
   },
 
   // ==========================================
-  // 4. ASISTENCIAS DE SEGUIMIENTO (PROBLEMA 2.5 & 2.6)
+  // TOLERANCIA DE IMPACTO / COMBATE
   // ==========================================
-  trackingAid: {
-    /** Multiplicador de separación estéreo izquierda/derecha para el audio 3D */
-    stereoSpreadBoost: 1.85,
-
-    /** Duración (segundos) de la flecha/indicador visual en el borde al perder de vista un mosquito */
-    edgeIndicatorDuration: 1.5,
-
-    /** Ángulo del cono de visión central (grados) para que la mira detecte y reaccione al apuntar */
-    reticleTargetConeDeg: 14,
-
-    /** Radio de colisión 3D del mosquito en metros (hitbox generosa) */
-    hitSphereRadius: 2.0,
-
-    /** Tolerancia de toque o click en pantalla (píxeles) para impacto garantizado */
-    screenTouchTolerancePx: 100,
+  combat: {
+    hitboxRadius: 2.0,            // Radio de la esfera de impacto 3D en metros
+    screenTouchTolerancePx: 100,  // Tolerancia de toque en pantalla en píxeles
+    respawnDelaySec: 4.0,         // Segundos para reaparecer en su nido al morir
   },
 
   // ==========================================
-  // 5. NIDOS Y REAPARICIÓN
+  // NIDOS EN EL MUNDO
   // ==========================================
   nests: {
-    /** Cantidad de nidos en el mundo */
     count: 6,
-
-    /** Distancia mínima y máxima de los nidos al jugador (metros) */
     minDistance: 3.6,
     maxDistance: 7.2,
-
-    /** Rango de alturas de los nidos (metros) */
     minHeight: 0.9,
     maxHeight: 3.1,
-
-    /** Tiempo de espera en segundos para reaparecer en el nido al ser eliminado */
-    respawnDelaySec: 4.0,
   },
 };
