@@ -253,15 +253,15 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
       if (currentLvl === 3) {
         // Boss level
-        const bossNestPos = new THREE.Vector3(0.5, 1.8, -4.5);
+        const bossNestPos = new THREE.Vector3(0.0, 1.8, -5.5);
         const bossMos = new Mosquito({
           id: `boss_${nextMosquitoId++}`,
           nestId: 'boss_nest',
           nestPosition: bossNestPos,
-          nestRadius: 1.5,
+          nestRadius: 3.2,
           isBoss: true,
           scale: cfg.visibility.bossScale,
-          speed: 0.2,
+          speed: 0.22,
           level: 3,
         });
         scene.add(bossMos.group);
@@ -272,10 +272,12 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         const numMinionNests = 4;
         for (let i = 0; i < numMinionNests; i++) {
           const angle = (i / numMinionNests) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-          const dist = 4.2 + Math.random() * 2.8;
-          const height = 1.0 + Math.random() * 2.0;
+          const dist = 5.2 + Math.random() * 2.2;
+          const height = 0.8 + Math.random() * 2.2;
           const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-          const nestRadius = 0.9 + Math.random() * 0.6;
+          const nestRadius =
+            cfg.nests.minSweepRadius +
+            Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius);
           const nestId = `nest_${i + 1}`;
 
           const minionId = `mosquito_${nextMosquitoId++}`;
@@ -312,7 +314,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             cfg.nests.minHeight +
             Math.random() * (cfg.nests.maxHeight - cfg.nests.minHeight);
           const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-          const nestRadius = 0.9 + Math.random() * 0.6;
+          const nestRadius =
+            cfg.nests.minSweepRadius +
+            Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius);
           const nestId = `nest_${i + 1}`;
 
           const mosPerNest = currentLvl === 1 ? (i % 3 === 0 ? 2 : 1) : (i % 2 === 0 ? 2 : 1);
@@ -643,7 +647,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             // Aiming detection: check if camera aims near mosquito
             const dirToMos = mos.group.position.clone().sub(cameraPos).normalize();
             const dot = camForward.dot(dirToMos);
-            if (dot > targetConeDot && dist < 6.5) {
+            if (dot > targetConeDot && dist < 8.8) {
               isAimingNear = true;
             }
 
@@ -680,8 +684,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         // Emit edge indicator update
         onEdgeIndicatorUpdateRef.current?.(activeExitIndicator);
 
-        // Proximity heat calculation
-        const proximityHeat = THREE.MathUtils.clamp((6.5 - minDistance) / 4.8, 0, 1);
+        // Proximity heat calculation (caliente/frío up to 8.8m)
+        const proximityHeat = THREE.MathUtils.clamp((8.8 - minDistance) / 5.5, 0, 1);
         onProximityHeatUpdateRef.current?.(proximityHeat, isAimingNear);
 
         // Radar guidance

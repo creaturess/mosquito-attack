@@ -103,12 +103,11 @@ export class SpatialBuzzManager {
     const now = this.ctx.currentTime;
     const distance = Math.max(0.25, Math.sqrt(relX * relX + relY * relY + relZ * relZ));
 
-    // --- 3. DISTANCE ROLLOFF (casi inaudible a 8m, muy fuerte a 1-2m) ---
-    // Clear rolloff curve: below 8m ramps smoothly; beyond 8m is a tiny imperceptible trace (0.015)
-    const distNorm = Math.max(0, Math.min(1, (8.0 - distance) / 6.8));
+    // --- 3. DISTANCE ROLLOFF (audible guide from 9-10m, crisp and clear at 4-7m) ---
+    const distNorm = Math.max(0, Math.min(1, (10.0 - distance) / 8.5));
     let distanceGain = isBoss
-      ? Math.max(0.08, Math.min(1.0, Math.pow(distNorm, 1.4) * 0.95 + 0.05))
-      : Math.pow(distNorm, 1.85) * 0.96 + 0.015;
+      ? Math.max(0.08, Math.min(1.0, Math.pow(distNorm, 1.3) * 0.95 + 0.05))
+      : Math.pow(distNorm, 1.45) * 0.96 + 0.02;
 
     let voice = this.activeVoices.get(id);
 

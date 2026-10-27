@@ -88,14 +88,18 @@ export class Mosquito {
   public baseScale: number;
 
   constructor(options: MosquitoOptions) {
+    const cfg = GAMEPLAY_CONFIG;
     this.id = options.id;
     this.nestId = options.nestId;
     this.nestPosition = options.nestPosition.clone();
-    this.nestRadius = options.nestRadius || (options.isBoss ? 2.5 : 1.35 + Math.random() * 0.9);
+    this.nestRadius =
+      options.nestRadius ||
+      (options.isBoss
+        ? 3.2
+        : cfg.nests.minSweepRadius +
+          Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius));
     this.isBoss = !!options.isBoss;
     this.level = options.level || 1;
-
-    const cfg = GAMEPLAY_CONFIG;
     const defaultSpeed = this.isBoss
       ? 0.2
       : this.level === 1
@@ -320,36 +324,39 @@ export class Mosquito {
       }
     }
 
-    // Detect exit from screen and record edge exit direction
+    // Detect exit from screen and record edge exit direction for HUD indicator
     if (this.wasInView && !isInView) {
-      this.edgeLingerTimer = cfg.movement.screenEdgeLingerTime;
       const angle = Math.atan2(screenRelY, screenRelX);
       this.lastExitDirection = { x: Math.cos(angle), y: Math.sin(angle) };
       this.lastExitTimestamp = performance.now();
     }
     this.wasInView = isInView;
 
-    if (this.edgeLingerTimer > 0) {
-      this.edgeLingerTimer -= delta;
-    }
+    // --- 2. Broad Tangential & Vertical Sweeping Trajectory across player's view ---
+    // Instead of hovering in a corner, sweep widely in the plane perpendicular to the viewing ray
+    const toNest = this.nestPosition.clone().sub(playerPos);
+    const nestDir = toNest.clone().normalize();
+    // Tangent perpendicular to the view line in horizontal plane
+    const tangentDir = new THREE.Vector3(-nestDir.z, 0, nestDir.x).normalize();
+    const upDir = new THREE.Vector3(0, 1, 0);
 
-    // --- 2. Lissajous Organic Trajectory around fixed Nest ---
     const rad = this.nestRadius;
-    const lissX = Math.sin(t * this.freqX1 + this.phaseX) * rad + Math.cos(t * this.freqX2) * (rad * 0.4);
-    const lissY = Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.4) + Math.cos(t * this.freqY2) * 0.22;
-    const lissZ = Math.cos(t * this.freqZ1 + this.phaseZ) * rad + Math.sin(t * this.freqZ2) * (rad * 0.4);
+    // Wide lateral sweep across the full width of the screen (amplitude up to ±3.8m)
+    const tangentOffset =
+      Math.sin(t * this.freqX1 + this.phaseX) * (rad * 1.25) +
+      Math.cos(t * this.freqX2) * (rad * 0.45);
+    // Wide vertical sweep from bottom to top of screen (amplitude up to ±2.2m)
+    const verticalOffset =
+      Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.75) +
+      Math.cos(t * this.freqY2) * 0.55;
+    // Gentle depth breathing (keeps it at 5.0m - 7.8m)
+    const radialOffset = Math.cos(t * this.freqZ1 + this.phaseZ) * (rad * 0.4);
 
-    let targetPos = this.nestPosition.clone().add(new THREE.Vector3(lissX, lissY, lissZ));
-
-    // If lingering near edge, curve trajectory gently towards center to give player time to reacquire
-    if (this.edgeLingerTimer > 0 && this.lastExitDirection) {
-      const nudgeBack = new THREE.Vector3(
-        -this.lastExitDirection.x * 0.8,
-        -this.lastExitDirection.y * 0.5,
-        0
-      );
-      targetPos.add(nudgeBack);
-    }
+    let targetPos = this.nestPosition
+      .clone()
+      .addScaledVector(tangentDir, tangentOffset)
+      .addScaledVector(upDir, verticalOffset)
+      .addScaledVector(nestDir, radialOffset);
 
     // --- 3. Darting Acceleration & Zigzags (brief and infrequent) ---
     this.dartTimer += delta;
