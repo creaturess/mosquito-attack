@@ -252,55 +252,32 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const cfg = GAMEPLAY_CONFIG;
 
       if (currentLvl === 3) {
-        // Boss level
-        const bossNestPos = new THREE.Vector3(0.0, 1.8, -5.5);
+        // Level 3 Boss: ONLY the King Mosquito, absolutely no other mosquitoes!
+        buzzManager.stopAll();
+        const bossNestPos = new THREE.Vector3(0.0, 1.6, -2.6);
         const bossMos = new Mosquito({
           id: `boss_${nextMosquitoId++}`,
           nestId: 'boss_nest',
           nestPosition: bossNestPos,
-          nestRadius: 3.2,
+          nestRadius: 1.5,
           isBoss: true,
           scale: cfg.visibility.bossScale,
           speed: 0.22,
           level: 3,
         });
+        bossMos.group.position.copy(bossNestPos);
+        bossMos.group.lookAt(camera.position);
         scene.add(bossMos.group);
         scene.add(bossMos.trailLine);
         mosquitoes.push(bossMos);
         bossInstance = bossMos;
 
-        const numMinionNests = 4;
-        for (let i = 0; i < numMinionNests; i++) {
-          const angle = (i / numMinionNests) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-          const dist = 5.2 + Math.random() * 2.2;
-          const height = 0.8 + Math.random() * 2.2;
-          const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-          const nestRadius =
-            cfg.nests.minSweepRadius +
-            Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius);
-          const nestId = `nest_${i + 1}`;
-
-          const minionId = `mosquito_${nextMosquitoId++}`;
-          const minion = new Mosquito({
-            id: minionId,
-            nestId,
-            nestPosition: nestPos,
-            nestRadius,
-            scale: cfg.visibility.baseScale * 0.9,
-            speed: cfg.movement.baseSpeedLvl2,
-            level: 3,
-          });
-          scene.add(minion.group);
-          scene.add(minion.trailLine);
-          mosquitoes.push(minion);
-
-          nests.push({
-            id: nestId,
-            position: nestPos,
-            radius: nestRadius,
-            mosquitoIds: [minionId],
-          });
-        }
+        nests.push({
+          id: 'boss_nest',
+          position: bossNestPos,
+          radius: 2.0,
+          mosquitoIds: [bossMos.id],
+        });
       } else {
         // Levels 1 & 2: 6 fixed nests distributed 360 degrees
         const totalNests = cfg.nests.count;
@@ -611,10 +588,11 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               cameraPos,
               audio.volume,
               cameraMatrixInverse,
-              camera.aspect
+              camera.aspect,
+              camForward
             );
 
-            if (now - mos.deathTime > GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000) {
+            if (!mos.isBoss && now - mos.deathTime > GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000) {
               mos.respawnAtNest();
             }
           } else {
@@ -624,22 +602,27 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               cameraPos,
               audio.volume,
               cameraMatrixInverse,
-              camera.aspect
+              camera.aspect,
+              camForward
             );
 
             // Calculate spatial audio position relative to camera view
             const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
             const dist = relPos.length();
             const speedRatio = mos.currentSpeed / (mos.baseSpeed || 0.35);
-            buzzManager.updateMosquitoBuzz(
-              mos.id,
-              relPos.x,
-              relPos.y,
-              relPos.z,
-              mos.isBoss,
-              1.0,
-              speedRatio
-            );
+
+            // King mosquito makes NO noise so player can scream without audio interference
+            if (!mos.isBoss && stateRef.current.currentLevel !== 3) {
+              buzzManager.updateMosquitoBuzz(
+                mos.id,
+                relPos.x,
+                relPos.y,
+                relPos.z,
+                false,
+                1.0,
+                speedRatio
+              );
+            }
 
             if (dist < minDistance) {
               minDistance = dist;

@@ -47,7 +47,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
             {level === 2 &&
               'Los mosquitos son un poco más pequeños y se mueven más rápido en tu espacio físico. Sigue su zumbido agudo y elimínalos con rapidez.'}
             {level === 3 &&
-              '¡El Mosquito Gigante ha aparecido frente a ti en tu entorno! Para derrotarlo debes GRITAR lo más fuerte posible durante 10 segundos.'}
+              '¡El Mosquito Gigante ha aparecido frente a ti en tu cámara! Se moverá solo hacia adelante y hacia atrás mirándote de frente en silencio. ¡GRITA lo más fuerte posible durante 10 segundos para destruirlo!'}
           </p>
 
           <div className="my-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-3 text-left">

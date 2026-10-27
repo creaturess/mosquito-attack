@@ -287,7 +287,8 @@ export class Mosquito {
     playerPos: THREE.Vector3,
     reactiveAudioLevel: number = 0,
     cameraMatrixInverse?: THREE.Matrix4,
-    cameraAspect: number = 1.0
+    cameraAspect: number = 1.0,
+    camForward?: THREE.Vector3
   ) {
     const cfg = GAMEPLAY_CONFIG;
 
@@ -303,6 +304,79 @@ export class Mosquito {
     }
 
     const t = elapsedTime + this.timeOffset;
+
+    // --- SPECIAL BOSS BEHAVIOR (King Mosquito Level 3) ---
+    // 1. Always looks directly at player head-on (facing front)
+    // 2. Only moves forward and backward (NO lateral drift to the sides)
+    // 3. Shakes under acoustic scream damage
+    if (this.isBoss) {
+      const forwardDir = camForward
+        ? camForward.clone().normalize()
+        : new THREE.Vector3(0, 0, -1);
+
+      // Distance oscillates smoothly forward and backward (advancing menacingly and backing away)
+      const cycleTime = t * 0.75;
+      const hoverDistance = 2.4 + Math.sin(cycleTime) * 0.95; // between ~1.45m and ~3.35m
+
+      // Position strictly along the gaze/forward axis - zero lateral/side drift
+      const bossTargetPos = playerPos.clone().addScaledVector(forwardDir, hoverDistance);
+
+      // Gentle vertical hover breathing
+      bossTargetPos.y += Math.sin(t * 1.5) * 0.04;
+
+      // Acoustic scream reaction: intense vibration/shake when player screams
+      if (reactiveAudioLevel > 0.05) {
+        const shakeAmt = reactiveAudioLevel * 0.16;
+        bossTargetPos.x += (Math.random() - 0.5) * shakeAmt;
+        bossTargetPos.y += (Math.random() - 0.5) * shakeAmt;
+        bossTargetPos.z += (Math.random() - 0.5) * shakeAmt;
+      }
+
+      // Smoothly update position along the forward/backward line
+      this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.0));
+
+      // Always look directly at the player/camera (head-on)
+      this.group.lookAt(playerPos);
+      this.group.rotation.z = 0; // Keep level, no roll to the sides
+
+      // Wing flapping animation
+      const flapRate = this.flapSpeed * (reactiveAudioLevel > 0.05 ? 1.6 : 1.0);
+      const flap = Math.sin(t * flapRate) * 0.85;
+      this.leftWing.rotation.z = flap;
+      this.rightWing.rotation.z = -flap;
+
+      // Solid opacity and size
+      this.currentOpacity = 1.0;
+      for (const mat of this.materials) {
+        mat.opacity = 1.0;
+        mat.transparent = false;
+      }
+      this.group.scale.setScalar(this.baseScale);
+
+      // Motion trail
+      if (cfg.trail.enabled) {
+        const tailPos = this.group.position.clone().add(
+          new THREE.Vector3(0, 0, 0.35).applyQuaternion(this.group.quaternion)
+        );
+        this.trailPoints.unshift({
+          position: tailPos,
+          timestamp: elapsedTime,
+        });
+        const cutoffTime = elapsedTime - cfg.trail.lifetimeSec;
+        while (
+          this.trailPoints.length > 0 &&
+          this.trailPoints[this.trailPoints.length - 1].timestamp < cutoffTime
+        ) {
+          this.trailPoints.pop();
+        }
+        if (this.trailPoints.length > cfg.trail.maxPoints) {
+          this.trailPoints.length = cfg.trail.maxPoints;
+        }
+        this.updateTrailGeometry();
+      }
+      return;
+    }
+
     const distToCamera = this.group.position.distanceTo(playerPos);
 
     // --- 1. Check if mosquito is in player's field of view ---
