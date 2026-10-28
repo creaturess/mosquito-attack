@@ -186,6 +186,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     // Clear all active mosquitoes and debug meshes
     const clearMosquitoes = () => {
       mosquitoes.forEach((m) => {
+        m.dispose();
         scene.remove(m.group);
         scene.remove(m.trailLine);
         buzzManager.stopMosquitoBuzz(m.id);

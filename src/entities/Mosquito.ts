@@ -1,17 +1,19 @@
 /**
  * Mosquito.ts
- * High-legibility 3D Mosquito entity with:
- * - Full opacity (1.0 solid) within visible range (<= 4m), smooth fade-in between 6m and 4m
- * - High-contrast body with subtle light outline/rim for visibility on dark and light backgrounds
+ * 3D Mosquito entity utilizing the GLTF model loaded from src/assets/scene.gltf:
+ * - Real 3D GLTF mesh asset with automatic scale/pivot normalization
+ * - High-contrast carapace and wings with solid 100% opacity
  * - Guaranteed minimum screen size (never becomes an invisible speck)
  * - Motion trail (estela de movimiento) fading over ~0.4s to aid visual tracking
  * - Angular velocity capping (<= 75 deg/sec in view) and smooth eased turns
  * - Screen-edge lingering to prevent losing sight of the mosquito abruptly
  * - 3D world-nest anchoring and 4.0s respawning upon death
+ * - Seamless fallback and instant swap when GLTF model is ready
  */
 
 import * as THREE from 'three';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
+import { mosquitoModelLoader } from './MosquitoModelLoader';
 
 export interface MosquitoOptions {
   id: string;
@@ -40,9 +42,14 @@ export class Mosquito {
   public deathTime: number = 0;
   public level: 1 | 2 | 3;
 
-  // Wings & body meshes
-  private leftWing: THREE.Mesh;
-  private rightWing: THREE.Mesh;
+  // 3D GLTF Model from src/assets/scene.gltf
+  public gltfModel: THREE.Group | null = null;
+  private proceduralModel: THREE.Group | null = null;
+  private unsubscribeModelReady: (() => void) | null = null;
+
+  // Procedural Wings (used when GLTF is loading)
+  private leftWing: THREE.Mesh | null = null;
+  private rightWing: THREE.Mesh | null = null;
   public hitSphere: THREE.Mesh;
 
   // Motion Trail (Estela de movimiento)
@@ -127,128 +134,22 @@ export class Mosquito {
     this.group = new THREE.Group();
     this.group.position.copy(this.nestPosition);
 
-    // --- High-Contrast Materials with Clean Light Outline ---
-    // Dark body with subtle metallic reflection (100% Sólido)
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: this.isBoss ? 0x2b0615 : 0x141619,
-      roughness: 0.45,
-      metalness: 0.15,
-      transparent: false,
-      opacity: 1.0,
-    });
-    this.materials.push(bodyMat);
-
-    // Subtle light outline/rim material for high contrast on light & dark backgrounds
-    const outlineMat = new THREE.MeshBasicMaterial({
-      color: cfg.visibility.outlineColor,
-      side: THREE.BackSide,
-      transparent: false,
-      opacity: 1.0,
-    });
-    this.materials.push(outlineMat);
-
-    // Bright glowing compound eyes
-    const eyeMat = new THREE.MeshBasicMaterial({
-      color: this.isBoss ? 0xff0055 : 0xff2200,
-      transparent: false,
-      opacity: 1.0,
-    });
-    this.materials.push(eyeMat);
-
-    // Visible wings
-    const wingMat = new THREE.MeshBasicMaterial({
-      color: this.isBoss ? 0xf472b6 : 0xdbeafe,
-      side: THREE.DoubleSide,
-      transparent: false,
-      opacity: 1.0,
-    });
-    this.materials.push(wingMat);
-
-    const needleMat = new THREE.MeshBasicMaterial({
-      color: 0x09090b,
-      transparent: false,
-      opacity: 1.0,
-    });
-    this.materials.push(needleMat);
-
-    // --- Mesh Hierarchy ---
-    // 1. Abdomen
-    const abdomenGeo = new THREE.ConeGeometry(0.18, 0.9, 8);
-    abdomenGeo.rotateX(Math.PI / 2);
-    const abdomen = new THREE.Mesh(abdomenGeo, bodyMat);
-    abdomen.position.set(0, 0, 0.45);
-    this.group.add(abdomen);
-
-    // Outline for Abdomen
-    const abdomenOutline = new THREE.Mesh(
-      abdomenGeo,
-      outlineMat
-    );
-    abdomenOutline.scale.set(1.12, 1.08, 1.12);
-    abdomenOutline.position.copy(abdomen.position);
-    this.group.add(abdomenOutline);
-
-    // 2. Thorax
-    const thoraxGeo = new THREE.SphereGeometry(0.24, 8, 8);
-    const thorax = new THREE.Mesh(thoraxGeo, bodyMat);
-    this.group.add(thorax);
-
-    // Outline for Thorax
-    const thoraxOutline = new THREE.Mesh(thoraxGeo, outlineMat);
-    thoraxOutline.scale.setScalar(1.14);
-    this.group.add(thoraxOutline);
-
-    // 3. Head
-    const headGeo = new THREE.SphereGeometry(0.16, 8, 8);
-    const head = new THREE.Mesh(headGeo, bodyMat);
-    head.position.set(0, 0.05, -0.32);
-    this.group.add(head);
-
-    // 4. Glowing Eyes
-    const eyeGeo = new THREE.SphereGeometry(0.075, 6, 6);
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(-0.09, 0.1, -0.38);
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.09, 0.1, -0.38);
-    this.group.add(leftEye, rightEye);
-
-    // 5. Proboscis
-    const needleGeo = new THREE.CylinderGeometry(0.018, 0.035, 0.45, 5);
-    needleGeo.rotateX(Math.PI / 3);
-    const needle = new THREE.Mesh(needleGeo, needleMat);
-    needle.position.set(0, -0.15, -0.5);
-    this.group.add(needle);
-
-    // 6. Wings
-    const wingGeo = new THREE.PlaneGeometry(0.3, 0.9);
-    wingGeo.translate(0, 0.45, 0);
-    wingGeo.rotateX(Math.PI / 2);
-
-    this.leftWing = new THREE.Mesh(wingGeo, wingMat);
-    this.leftWing.position.set(-0.12, 0.18, -0.05);
-    this.leftWing.rotation.y = 0.5;
-
-    this.rightWing = new THREE.Mesh(wingGeo, wingMat);
-    this.rightWing.position.set(0.12, 0.18, -0.05);
-    this.rightWing.rotation.y = -0.5;
-
-    this.group.add(this.leftWing, this.rightWing);
-
-    // 7. Legs
-    for (let i = -1; i <= 1; i++) {
-      const legGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.65, 3);
-      const lLeg = new THREE.Mesh(legGeo, needleMat);
-      lLeg.position.set(-0.25, -0.2, i * 0.18);
-      lLeg.rotation.z = 0.8;
-      lLeg.rotation.x = i * 0.3;
-      const rLeg = new THREE.Mesh(legGeo, needleMat);
-      rLeg.position.set(0.25, -0.2, i * 0.18);
-      rLeg.rotation.z = -0.8;
-      rLeg.rotation.x = i * 0.3;
-      this.group.add(lLeg, rLeg);
+    // 1. Try to attach 3D GLTF Model from src/assets/scene.gltf
+    const gltfInstance = mosquitoModelLoader.createInstance(this.isBoss);
+    if (gltfInstance) {
+      this.attachGltfModel(gltfInstance);
+    } else {
+      // Create lightweight procedural placeholder until GLTF finishes loading
+      this.createProceduralPlaceholder();
+      this.unsubscribeModelReady = mosquitoModelLoader.onReady(() => {
+        const readyInstance = mosquitoModelLoader.createInstance(this.isBoss);
+        if (readyInstance) {
+          this.attachGltfModel(readyInstance);
+        }
+      });
     }
 
-    // 8. Hit detection sphere - Generous hitbox
+    // 2. Hit detection sphere - Generous hitbox
     const hitRadius = this.isBoss ? 3.2 : cfg.trackingAid.hitSphereRadius;
     const hitGeo = new THREE.SphereGeometry(hitRadius, 6, 6);
     const hitMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: true });
@@ -256,7 +157,7 @@ export class Mosquito {
     this.hitSphere.userData = { mosquitoId: this.id, isBoss: this.isBoss };
     this.group.add(this.hitSphere);
 
-    // 9. Motion Trail Geometry & Line
+    // 3. Motion Trail Geometry & Line
     const maxTrailPoints = cfg.trail.maxPoints;
     this.trailPositionsArray = new Float32Array(maxTrailPoints * 3);
     const trailGeo = new THREE.BufferGeometry();
@@ -276,6 +177,135 @@ export class Mosquito {
 
     // Start with zero opacity
     this.group.scale.setScalar(this.baseScale * cfg.visibility.minScaleFactor);
+  }
+
+  /**
+   * Attaches the 3D GLTF Model loaded from src/assets/scene.gltf
+   */
+  private attachGltfModel(instance: THREE.Group) {
+    if (this.gltfModel) {
+      this.group.remove(this.gltfModel);
+    }
+    if (this.proceduralModel) {
+      this.group.remove(this.proceduralModel);
+      this.proceduralModel = null;
+      this.leftWing = null;
+      this.rightWing = null;
+    }
+
+    this.gltfModel = instance;
+    this.group.add(this.gltfModel);
+
+    // Extract materials from GLTF for opacity tracking
+    this.gltfModel.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        if (mesh.material) {
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          mats.forEach((m) => {
+            if (!this.materials.includes(m)) {
+              this.materials.push(m);
+            }
+          });
+        }
+      }
+    });
+  }
+
+  /**
+   * Temporary procedural placeholder during GLTF stream/decode
+   */
+  private createProceduralPlaceholder() {
+    const cfg = GAMEPLAY_CONFIG;
+    this.proceduralModel = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: this.isBoss ? 0x2b0615 : 0x141619,
+      roughness: 0.45,
+      metalness: 0.15,
+      transparent: false,
+      opacity: 1.0,
+    });
+    this.materials.push(bodyMat);
+
+    const outlineMat = new THREE.MeshBasicMaterial({
+      color: cfg.visibility.outlineColor,
+      side: THREE.BackSide,
+      transparent: false,
+      opacity: 1.0,
+    });
+    this.materials.push(outlineMat);
+
+    const eyeMat = new THREE.MeshBasicMaterial({
+      color: this.isBoss ? 0xff0055 : 0xff2200,
+      transparent: false,
+      opacity: 1.0,
+    });
+    this.materials.push(eyeMat);
+
+    const wingMat = new THREE.MeshBasicMaterial({
+      color: this.isBoss ? 0xf472b6 : 0xdbeafe,
+      side: THREE.DoubleSide,
+      transparent: false,
+      opacity: 1.0,
+    });
+    this.materials.push(wingMat);
+
+    const needleMat = new THREE.MeshBasicMaterial({
+      color: 0x09090b,
+      transparent: false,
+      opacity: 1.0,
+    });
+    this.materials.push(needleMat);
+
+    // Abdomen
+    const abdomenGeo = new THREE.ConeGeometry(0.18, 0.9, 8);
+    abdomenGeo.rotateX(Math.PI / 2);
+    const abdomen = new THREE.Mesh(abdomenGeo, bodyMat);
+    abdomen.position.set(0, 0, 0.45);
+    this.proceduralModel.add(abdomen);
+
+    // Thorax
+    const thoraxGeo = new THREE.SphereGeometry(0.24, 8, 8);
+    const thorax = new THREE.Mesh(thoraxGeo, bodyMat);
+    this.proceduralModel.add(thorax);
+
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.16, 8, 8);
+    const head = new THREE.Mesh(headGeo, bodyMat);
+    head.position.set(0, 0.05, -0.32);
+    this.proceduralModel.add(head);
+
+    // Eyes
+    const eyeGeo = new THREE.SphereGeometry(0.075, 6, 6);
+    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+    leftEye.position.set(-0.09, 0.1, -0.38);
+    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+    rightEye.position.set(0.09, 0.1, -0.38);
+    this.proceduralModel.add(leftEye, rightEye);
+
+    // Proboscis
+    const needleGeo = new THREE.CylinderGeometry(0.018, 0.035, 0.45, 5);
+    needleGeo.rotateX(Math.PI / 3);
+    const needle = new THREE.Mesh(needleGeo, needleMat);
+    needle.position.set(0, -0.15, -0.5);
+    this.proceduralModel.add(needle);
+
+    // Wings
+    const wingGeo = new THREE.PlaneGeometry(0.3, 0.9);
+    wingGeo.translate(0, 0.45, 0);
+    wingGeo.rotateX(Math.PI / 2);
+
+    this.leftWing = new THREE.Mesh(wingGeo, wingMat);
+    this.leftWing.position.set(-0.12, 0.18, -0.05);
+    this.leftWing.rotation.y = 0.5;
+
+    this.rightWing = new THREE.Mesh(wingGeo, wingMat);
+    this.rightWing.position.set(0.12, 0.18, -0.05);
+    this.rightWing.rotation.y = -0.5;
+
+    this.proceduralModel.add(this.leftWing, this.rightWing);
+    this.group.add(this.proceduralModel);
   }
 
   /**
@@ -306,25 +336,17 @@ export class Mosquito {
     const t = elapsedTime + this.timeOffset;
 
     // --- SPECIAL BOSS BEHAVIOR (King Mosquito Level 3) ---
-    // 1. Always looks directly at player head-on (facing front)
-    // 2. Only moves forward and backward (NO lateral drift to the sides)
-    // 3. Shakes under acoustic scream damage
     if (this.isBoss) {
       const forwardDir = camForward
         ? camForward.clone().normalize()
         : new THREE.Vector3(0, 0, -1);
 
-      // Distance oscillates smoothly forward and backward (advancing menacingly and backing away)
       const cycleTime = t * 0.75;
-      const hoverDistance = 2.4 + Math.sin(cycleTime) * 0.95; // between ~1.45m and ~3.35m
+      const hoverDistance = 2.4 + Math.sin(cycleTime) * 0.95;
 
-      // Position strictly along the gaze/forward axis - zero lateral/side drift
       const bossTargetPos = playerPos.clone().addScaledVector(forwardDir, hoverDistance);
-
-      // Gentle vertical hover breathing
       bossTargetPos.y += Math.sin(t * 1.5) * 0.04;
 
-      // Acoustic scream reaction: intense vibration/shake when player screams
       if (reactiveAudioLevel > 0.05) {
         const shakeAmt = reactiveAudioLevel * 0.16;
         bossTargetPos.x += (Math.random() - 0.5) * shakeAmt;
@@ -332,20 +354,23 @@ export class Mosquito {
         bossTargetPos.z += (Math.random() - 0.5) * shakeAmt;
       }
 
-      // Smoothly update position along the forward/backward line
       this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.0));
-
-      // Always look directly at the player/camera (head-on)
       this.group.lookAt(playerPos);
-      this.group.rotation.z = 0; // Keep level, no roll to the sides
+      this.group.rotation.z = 0;
 
-      // Wing flapping animation
+      // Wing flapping & flight vibration
       const flapRate = this.flapSpeed * (reactiveAudioLevel > 0.05 ? 1.6 : 1.0);
       const flap = Math.sin(t * flapRate) * 0.85;
-      this.leftWing.rotation.z = flap;
-      this.rightWing.rotation.z = -flap;
 
-      // Solid opacity and size
+      if (this.leftWing && this.rightWing) {
+        this.leftWing.rotation.z = flap;
+        this.rightWing.rotation.z = -flap;
+      }
+      if (this.gltfModel) {
+        this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.12;
+        this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.03;
+      }
+
       this.currentOpacity = 1.0;
       for (const mat of this.materials) {
         mat.opacity = 1.0;
@@ -353,7 +378,6 @@ export class Mosquito {
       }
       this.group.scale.setScalar(this.baseScale);
 
-      // Motion trail
       if (cfg.trail.enabled) {
         const tailPos = this.group.position.clone().add(
           new THREE.Vector3(0, 0, 0.35).applyQuaternion(this.group.quaternion)
@@ -387,7 +411,7 @@ export class Mosquito {
     if (cameraMatrixInverse) {
       const relCam = this.group.position.clone().applyMatrix4(cameraMatrixInverse);
       if (relCam.z < -0.2) {
-        const fovTan = Math.tan((35 * Math.PI) / 180); // 70deg FOV half
+        const fovTan = Math.tan((35 * Math.PI) / 180);
         const halfWidthAtZ = -relCam.z * fovTan * cameraAspect;
         const halfHeightAtZ = -relCam.z * fovTan;
 
@@ -398,7 +422,6 @@ export class Mosquito {
       }
     }
 
-    // Detect exit from screen and record edge exit direction for HUD indicator
     if (this.wasInView && !isInView) {
       const angle = Math.atan2(screenRelY, screenRelX);
       this.lastExitDirection = { x: Math.cos(angle), y: Math.sin(angle) };
@@ -406,24 +429,19 @@ export class Mosquito {
     }
     this.wasInView = isInView;
 
-    // --- 2. Broad Tangential & Vertical Sweeping Trajectory across player's view ---
-    // Instead of hovering in a corner, sweep widely in the plane perpendicular to the viewing ray
+    // --- 2. Broad Tangential & Vertical Sweeping Trajectory ---
     const toNest = this.nestPosition.clone().sub(playerPos);
     const nestDir = toNest.clone().normalize();
-    // Tangent perpendicular to the view line in horizontal plane
     const tangentDir = new THREE.Vector3(-nestDir.z, 0, nestDir.x).normalize();
     const upDir = new THREE.Vector3(0, 1, 0);
 
     const rad = this.nestRadius;
-    // Wide lateral sweep across the full width of the screen (amplitude up to ±3.8m)
     const tangentOffset =
       Math.sin(t * this.freqX1 + this.phaseX) * (rad * 1.25) +
       Math.cos(t * this.freqX2) * (rad * 0.45);
-    // Wide vertical sweep from bottom to top of screen (amplitude up to ±2.2m)
     const verticalOffset =
       Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.75) +
       Math.cos(t * this.freqY2) * 0.55;
-    // Gentle depth breathing (keeps it at 5.0m - 7.8m)
     const radialOffset = Math.cos(t * this.freqZ1 + this.phaseZ) * (rad * 0.4);
 
     let targetPos = this.nestPosition
@@ -432,7 +450,7 @@ export class Mosquito {
       .addScaledVector(upDir, verticalOffset)
       .addScaledVector(nestDir, radialOffset);
 
-    // --- 3. Darting Acceleration & Zigzags (brief and infrequent) ---
+    // --- 3. Darting Acceleration & Zigzags ---
     this.dartTimer += delta;
     if (!this.isDarting && this.dartTimer >= this.nextDartInterval) {
       this.isDarting = true;
@@ -459,16 +477,13 @@ export class Mosquito {
       }
     }
 
-    // Direction to orbital target
     const desiredDir = targetPos.clone().sub(this.group.position);
     const distToTarget = desiredDir.length();
     if (distToTarget > 0.001) desiredDir.normalize();
 
-    // Base target speed
     let nominalSpeed = this.baseSpeed * speedMultiplier * Math.min(2.0, Math.max(0.6, distToTarget * 1.2));
 
-    // --- 4. ANGULAR VELOCITY LIMITING (Requirement 2.1 & 2.4) ---
-    // When in player's view, enforce maximum angular velocity in screen space
+    // Clamping angular speed in view
     if (isInView) {
       nominalSpeed *= cfg.movement.inViewSpeedDamp;
       const maxLinearSpeed = distToCamera * (cfg.movement.maxAngularSpeedDeg * (Math.PI / 180));
@@ -477,41 +492,40 @@ export class Mosquito {
 
     this.currentSpeed = nominalSpeed;
     const targetVel = desiredDir.multiplyScalar(this.currentSpeed);
-
-    // Curved, smooth inertial turns (ease-in / ease-out)
     this.flightVelocity.lerp(targetVel, delta * cfg.movement.turnSmoothing);
 
-    // --- 5. Camera Repulsion (Never collide or stick to camera) ---
     if (distToCamera < cfg.movement.cameraRepelDistance) {
       const repelDir = this.group.position.clone().sub(playerPos).normalize();
       const repelForce = (cfg.movement.cameraRepelDistance - distToCamera) * 3.5;
       this.flightVelocity.addScaledVector(repelDir, repelForce);
     }
 
-    // Move mosquito group
     this.group.position.addScaledVector(this.flightVelocity, delta);
 
-    // Orient body towards flight velocity
     if (this.flightVelocity.lengthSq() > 0.0001) {
       this.group.lookAt(this.group.position.clone().add(this.flightVelocity));
       this.group.rotation.z = -this.flightVelocity.x * 0.15;
     }
 
-    // Wing flapping
+    // Wing flapping animation
     const flapRate = this.flapSpeed * (this.isDarting ? 1.3 : 1.0);
     const flap = Math.sin(t * flapRate) * 0.85;
-    this.leftWing.rotation.z = flap;
-    this.rightWing.rotation.z = -flap;
 
-    // --- 6. OPACITY & VISIBILITY: 100% OPACIDAD TOTAL SIEMPRE ---
+    if (this.leftWing && this.rightWing) {
+      this.leftWing.rotation.z = flap;
+      this.rightWing.rotation.z = -flap;
+    }
+    if (this.gltfModel) {
+      this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.1;
+      this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.02;
+    }
+
     this.currentOpacity = 1.0;
-
     for (const mat of this.materials) {
       mat.opacity = 1.0;
       mat.transparent = false;
     }
 
-    // Guaranteed minimum size clamp: scale between minScaleFactor (0.75) and 1.0
     const scaleFactor = THREE.MathUtils.lerp(
       cfg.visibility.minScaleFactor,
       1.0,
@@ -519,9 +533,7 @@ export class Mosquito {
     );
     this.group.scale.setScalar(this.baseScale * scaleFactor);
 
-    // --- 7. MOTION TRAIL UPDATE (PROBLEM 2.3) ---
     if (cfg.trail.enabled && this.currentOpacity > 0.05) {
-      // Record world position of abdomen / tail
       const tailPos = this.group.position.clone().add(
         new THREE.Vector3(0, 0, 0.35).applyQuaternion(this.group.quaternion)
       );
@@ -531,7 +543,6 @@ export class Mosquito {
         timestamp: elapsedTime,
       });
 
-      // Filter out points older than lifetimeSec (0.4s)
       const cutoffTime = elapsedTime - cfg.trail.lifetimeSec;
       while (
         this.trailPoints.length > 0 &&
@@ -540,7 +551,6 @@ export class Mosquito {
         this.trailPoints.pop();
       }
 
-      // Cap to max points
       if (this.trailPoints.length > cfg.trail.maxPoints) {
         this.trailPoints.length = cfg.trail.maxPoints;
       }
@@ -551,7 +561,6 @@ export class Mosquito {
       this.updateTrailGeometry();
     }
 
-    // Boss scream damage shake
     if (this.isBoss && reactiveAudioLevel > 0.05) {
       const shakeAmt = reactiveAudioLevel * 0.25;
       this.group.position.x += (Math.random() - 0.5) * shakeAmt;
@@ -560,9 +569,6 @@ export class Mosquito {
     }
   }
 
-  /**
-   * Updates the Motion Trail line geometry buffer
-   */
   private updateTrailGeometry() {
     const geo = this.trailLine.geometry as THREE.BufferGeometry;
     const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
@@ -575,7 +581,6 @@ export class Mosquito {
         this.trailPositionsArray[i * 3 + 1] = pt.y;
         this.trailPositionsArray[i * 3 + 2] = pt.z;
       } else if (count > 0) {
-        // Stretch last point
         const lastPt = this.trailPoints[count - 1].position;
         this.trailPositionsArray[i * 3] = lastPt.x;
         this.trailPositionsArray[i * 3 + 1] = lastPt.y;
@@ -587,9 +592,6 @@ export class Mosquito {
     geo.setDrawRange(0, Math.max(2, count));
   }
 
-  /**
-   * Respawns the mosquito back in its assigned world Nest
-   */
   public respawnAtNest() {
     this.isDead = false;
     this.deathTime = 0;
@@ -612,5 +614,12 @@ export class Mosquito {
     this.deathTime = performance.now();
     this.trailPoints = [];
     this.updateTrailGeometry();
+  }
+
+  public dispose() {
+    if (this.unsubscribeModelReady) {
+      this.unsubscribeModelReady();
+      this.unsubscribeModelReady = null;
+    }
   }
 }
