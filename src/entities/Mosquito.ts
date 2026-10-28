@@ -373,8 +373,13 @@ export class Mosquito {
 
       this.currentOpacity = 1.0;
       for (const mat of this.materials) {
-        mat.opacity = 1.0;
-        mat.transparent = false;
+        if (mat.name === 'wingMat') {
+          mat.transparent = true;
+          mat.opacity = 0.88;
+        } else {
+          mat.opacity = 1.0;
+          mat.transparent = false;
+        }
       }
       this.group.scale.setScalar(this.baseScale);
 
@@ -522,8 +527,13 @@ export class Mosquito {
 
     this.currentOpacity = 1.0;
     for (const mat of this.materials) {
-      mat.opacity = 1.0;
-      mat.transparent = false;
+      if (mat.name === 'wingMat') {
+        mat.transparent = true;
+        mat.opacity = 0.85;
+      } else {
+        mat.opacity = 1.0;
+        mat.transparent = false;
+      }
     }
 
     const scaleFactor = THREE.MathUtils.lerp(

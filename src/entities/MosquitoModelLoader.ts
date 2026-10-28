@@ -99,27 +99,44 @@ class MosquitoModelLoader {
     // The model's longest axis is Z
     root.add(model);
 
-    // Process materials for crisp AR visibility
+    // Apply distinct procedural PBR materials to parts for maximum clarity in AR
+    const standardBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x181a1d,
+      roughness: 0.38,
+      metalness: 0.25,
+      side: THREE.DoubleSide,
+    });
+
+    const standardWingMat = new THREE.MeshStandardMaterial({
+      name: 'wingMat',
+      color: 0xbae6fd,
+      roughness: 0.2,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    });
+
+    const standardEyeMat = new THREE.MeshStandardMaterial({
+      color: 0xff3300,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.85,
+      roughness: 0.2,
+      metalness: 0.1,
+    });
+
     model.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
 
-        if (mesh.material) {
-          // If array of materials or single material
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          mats.forEach((mat) => {
-            mat.transparent = false;
-            mat.opacity = 1.0;
-            mat.side = THREE.DoubleSide;
-            if ('roughness' in mat) {
-              (mat as THREE.MeshStandardMaterial).roughness = 0.4;
-            }
-            if ('metalness' in mat) {
-              (mat as THREE.MeshStandardMaterial).metalness = 0.2;
-            }
-          });
+        if (mesh.name === 'Mosquito_Mesh_Part_3') {
+          mesh.material = standardEyeMat;
+        } else if (mesh.name === 'Mosquito_Mesh_Part_4') {
+          mesh.material = standardWingMat;
+        } else {
+          mesh.material = standardBodyMat;
         }
       }
     });
@@ -129,19 +146,43 @@ class MosquitoModelLoader {
     // Create specialized Boss template (dark crimson carapace, ominous glowing eyes)
     this.bossTemplate = root.clone(true);
     this.bossTemplate.name = 'Mosquito_GLTF_Boss';
+
+    const bossBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x2e0615,
+      roughness: 0.32,
+      metalness: 0.4,
+      emissive: 0x3d0514,
+      emissiveIntensity: 0.35,
+      side: THREE.DoubleSide,
+    });
+
+    const bossWingMat = new THREE.MeshStandardMaterial({
+      name: 'wingMat',
+      color: 0xf472b6,
+      roughness: 0.25,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
+    });
+
+    const bossEyeMat = new THREE.MeshStandardMaterial({
+      color: 0xff0044,
+      emissive: 0xff0033,
+      emissiveIntensity: 1.2,
+      roughness: 0.15,
+      metalness: 0.1,
+    });
+
     this.bossTemplate.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
-        if (mesh.material) {
-          const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
-          if (mat.color) {
-            mat.color.setHex(0x3a0918); // Dark venomous crimson
-          }
-          if (mat.emissive) {
-            mat.emissive.setHex(0x440510);
-            mat.emissiveIntensity = 0.35;
-          }
-          mesh.material = mat;
+        if (mesh.name === 'Mosquito_Mesh_Part_3') {
+          mesh.material = bossEyeMat;
+        } else if (mesh.name === 'Mosquito_Mesh_Part_4') {
+          mesh.material = bossWingMat;
+        } else {
+          mesh.material = bossBodyMat;
         }
       }
     });
