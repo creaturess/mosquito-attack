@@ -1,14 +1,12 @@
 /**
  * Mosquito.ts
- * 3D Mosquito entity utilizing the GLTF model loaded from src/assets/scene.gltf:
- * - Real 3D GLTF mesh asset with automatic scale/pivot normalization
- * - High-contrast carapace and wings with solid 100% opacity
- * - Guaranteed minimum screen size (never becomes an invisible speck)
- * - Motion trail (estela de movimiento) fading over ~0.4s to aid visual tracking
- * - Angular velocity capping (<= 75 deg/sec in view) and smooth eased turns
- * - Screen-edge lingering to prevent losing sight of the mosquito abruptly
- * - 3D world-nest anchoring and 4.0s respawning upon death
- * - Seamless fallback and instant swap when GLTF model is ready
+ * 3D Mosquito entity utilizing the custom 3D model:
+ * - Upright posture constraint (back always facing up, legs down, strictly no flipping/tumbling)
+ * - Authentic insect hovering and erratic buzzing/darting ("revoloteo")
+ * - Scaled appropriately smaller in Level 1 and 2
+ * - Inter-mosquito separation to prevent clumping
+ * - High-frequency wing buzzing and micro-flight vibration
+ * - Motion trail (estela de movimiento) and generous hit detection
  */
 
 import * as THREE from 'three';
@@ -42,14 +40,14 @@ export class Mosquito {
   public deathTime: number = 0;
   public level: 1 | 2 | 3;
 
-  // 3D GLTF Model from src/assets/scene.gltf
+  // 3D GLTF Model
   public gltfModel: THREE.Group | null = null;
   private gltfLeftWing: THREE.Mesh | null = null;
   private gltfRightWing: THREE.Mesh | null = null;
   private proceduralModel: THREE.Group | null = null;
   private unsubscribeModelReady: (() => void) | null = null;
 
-  // Procedural Wings (used when GLTF is loading)
+  // Procedural Wings (fallback)
   private leftWing: THREE.Mesh | null = null;
   private rightWing: THREE.Mesh | null = null;
   public hitSphere: THREE.Mesh;
@@ -66,7 +64,13 @@ export class Mosquito {
   private timeOffset: number;
   public flightVelocity: THREE.Vector3 = new THREE.Vector3();
 
-  // Lissajous orbital frequencies & phases
+  // Upright orientation states (Yaw around Y, clamped Pitch, clamped Roll)
+  private currentYaw: number = 0;
+  private currentPitch: number = 0;
+  private currentRoll: number = 0;
+  private angularTurnRate: number = 0;
+
+  // Lissajous & Revoloteo errático
   private freqX1: number;
   private freqX2: number;
   private freqY1: number;
@@ -77,9 +81,9 @@ export class Mosquito {
   private phaseY: number;
   private phaseZ: number;
 
-  // Picos de aceleración ocasionales (zigzags breves y poco frecuentes)
+  // Piques erráticos frecuentes de insecto (quiebres rápidos y revoloteo)
   private dartTimer: number = 0;
-  private nextDartInterval: number = 5.0;
+  private nextDartInterval: number = 0.8;
   private dartDuration: number = 0.22;
   private dartProgress: number = 0;
   public isDarting: boolean = false;
@@ -104,44 +108,53 @@ export class Mosquito {
     this.nestRadius =
       options.nestRadius ||
       (options.isBoss
-        ? 3.2
+        ? 2.8
         : cfg.nests.minSweepRadius +
           Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius));
     this.isBoss = !!options.isBoss;
     this.level = options.level || 1;
+
     const defaultSpeed = this.isBoss
-      ? 0.2
+      ? 0.22
       : this.level === 1
       ? cfg.movement.baseSpeedLvl1
       : cfg.movement.baseSpeedLvl2;
     this.baseSpeed = options.speed || defaultSpeed;
     this.currentSpeed = this.baseSpeed;
 
-    this.baseScale = options.scale || (this.isBoss ? cfg.visibility.bossScale : cfg.visibility.baseScale);
-    this.flapSpeed = this.isBoss ? 28 : this.level === 1 ? 42 : 58;
+    // Distinct, realistic scaling: Levels 1 and 2 are significantly smaller
+    const defaultScale = this.isBoss
+      ? cfg.visibility.bossScale
+      : this.level === 1
+      ? cfg.visibility.lvl1Scale
+      : cfg.visibility.lvl2Scale;
+    this.baseScale = options.scale || defaultScale;
+
+    this.flapSpeed = this.isBoss ? 30 : this.level === 1 ? 50 : 64;
     this.timeOffset = Math.random() * 100;
 
-    // Organic Lissajous frequencies
-    this.freqX1 = 0.35 + Math.random() * 0.25;
-    this.freqX2 = 0.75 + Math.random() * 0.3;
-    this.freqY1 = 0.28 + Math.random() * 0.22;
-    this.freqY2 = 0.65 + Math.random() * 0.28;
-    this.freqZ1 = 0.42 + Math.random() * 0.25;
-    this.freqZ2 = 0.85 + Math.random() * 0.3;
+    // Erratic Lissajous frequencies
+    this.freqX1 = 0.5 + Math.random() * 0.4;
+    this.freqX2 = 1.1 + Math.random() * 0.5;
+    this.freqY1 = 0.4 + Math.random() * 0.35;
+    this.freqY2 = 0.9 + Math.random() * 0.4;
+    this.freqZ1 = 0.55 + Math.random() * 0.4;
+    this.freqZ2 = 1.2 + Math.random() * 0.5;
 
     this.phaseX = Math.random() * Math.PI * 2;
     this.phaseY = Math.random() * Math.PI * 2;
     this.phaseZ = Math.random() * Math.PI * 2;
 
+    this.currentYaw = Math.random() * Math.PI * 2;
+
     this.group = new THREE.Group();
     this.group.position.copy(this.nestPosition);
 
-    // 1. Try to attach 3D GLTF Model from src/assets/scene.gltf
+    // 1. Attach 3D Model
     const gltfInstance = mosquitoModelLoader.createInstance(this.isBoss);
     if (gltfInstance) {
       this.attachGltfModel(gltfInstance);
     } else {
-      // Create lightweight procedural placeholder until GLTF finishes loading
       this.createProceduralPlaceholder();
       this.unsubscribeModelReady = mosquitoModelLoader.onReady(() => {
         const readyInstance = mosquitoModelLoader.createInstance(this.isBoss);
@@ -151,15 +164,15 @@ export class Mosquito {
       });
     }
 
-    // 2. Hit detection sphere - Generous hitbox
-    const hitRadius = this.isBoss ? 3.2 : cfg.trackingAid.hitSphereRadius;
+    // 2. Generous Hit detection sphere (ensures easy touching at 4-7m)
+    const hitRadius = this.isBoss ? 3.4 : cfg.trackingAid.hitSphereRadius;
     const hitGeo = new THREE.SphereGeometry(hitRadius, 6, 6);
     const hitMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: true });
     this.hitSphere = new THREE.Mesh(hitGeo, hitMat);
     this.hitSphere.userData = { mosquitoId: this.id, isBoss: this.isBoss };
     this.group.add(this.hitSphere);
 
-    // 3. Motion Trail Geometry & Line
+    // 3. Motion Trail Line
     const maxTrailPoints = cfg.trail.maxPoints;
     this.trailPositionsArray = new Float32Array(maxTrailPoints * 3);
     const trailGeo = new THREE.BufferGeometry();
@@ -177,13 +190,9 @@ export class Mosquito {
     this.trailLine = new THREE.Line(trailGeo, trailMat);
     this.trailLine.frustumCulled = false;
 
-    // Start with zero opacity
     this.group.scale.setScalar(this.baseScale * cfg.visibility.minScaleFactor);
   }
 
-  /**
-   * Attaches the 3D GLTF Model loaded from src/assets/scene.gltf
-   */
   private attachGltfModel(instance: THREE.Group) {
     if (this.gltfModel) {
       this.group.remove(this.gltfModel);
@@ -216,9 +225,6 @@ export class Mosquito {
     });
   }
 
-  /**
-   * Temporary procedural placeholder during GLTF stream/decode
-   */
   private createProceduralPlaceholder() {
     const cfg = GAMEPLAY_CONFIG;
     this.proceduralModel = new THREE.Group();
@@ -250,8 +256,8 @@ export class Mosquito {
     const wingMat = new THREE.MeshBasicMaterial({
       color: this.isBoss ? 0xf472b6 : 0xdbeafe,
       side: THREE.DoubleSide,
-      transparent: false,
-      opacity: 1.0,
+      transparent: true,
+      opacity: 0.85,
     });
     this.materials.push(wingMat);
 
@@ -313,7 +319,7 @@ export class Mosquito {
   }
 
   /**
-   * Flight physics & organic Lissajous orbital update with angular speed clamping
+   * Flight physics & realistic upright insect flight mechanics
    */
   public update(
     delta: number,
@@ -322,7 +328,8 @@ export class Mosquito {
     reactiveAudioLevel: number = 0,
     cameraMatrixInverse?: THREE.Matrix4,
     cameraAspect: number = 1.0,
-    camForward?: THREE.Vector3
+    camForward?: THREE.Vector3,
+    otherMosquitoes?: Mosquito[]
   ) {
     const cfg = GAMEPLAY_CONFIG;
 
@@ -331,7 +338,6 @@ export class Mosquito {
       this.group.rotation.x += delta * 6;
       this.group.rotation.z += delta * 4;
       this.group.scale.multiplyScalar(0.95);
-      // Clear trail when dead
       this.trailPoints = [];
       this.updateTrailGeometry();
       return;
@@ -339,7 +345,7 @@ export class Mosquito {
 
     const t = elapsedTime + this.timeOffset;
 
-    // --- SPECIAL BOSS BEHAVIOR (King Mosquito Level 3) ---
+    // --- LEVEL 3 BOSS (King Mosquito) ---
     if (this.isBoss) {
       const forwardDir = camForward
         ? camForward.clone().normalize()
@@ -349,18 +355,24 @@ export class Mosquito {
       const hoverDistance = 2.4 + Math.sin(cycleTime) * 0.95;
 
       const bossTargetPos = playerPos.clone().addScaledVector(forwardDir, hoverDistance);
-      bossTargetPos.y += Math.sin(t * 1.5) * 0.04;
+      // Realistic hover jitter
+      bossTargetPos.y += Math.sin(t * 12.0) * 0.035 + Math.cos(t * 18.0) * 0.02;
+      bossTargetPos.x += Math.sin(t * 9.0) * 0.04;
 
       if (reactiveAudioLevel > 0.05) {
-        const shakeAmt = reactiveAudioLevel * 0.16;
+        const shakeAmt = reactiveAudioLevel * 0.28;
         bossTargetPos.x += (Math.random() - 0.5) * shakeAmt;
         bossTargetPos.y += (Math.random() - 0.5) * shakeAmt;
         bossTargetPos.z += (Math.random() - 0.5) * shakeAmt;
       }
 
       this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.0));
-      this.group.lookAt(playerPos);
-      this.group.rotation.z = 0;
+
+      // Strictly upright posture: Rotate around Y to face player, no wild roll/flip
+      const toPlayer = playerPos.clone().sub(this.group.position);
+      const targetYaw = Math.atan2(toPlayer.x, toPlayer.z) + Math.PI;
+      this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, targetYaw, delta * 8.0);
+      this.group.rotation.set(0, this.currentYaw, 0, 'YXZ');
 
       // Wing flapping & flight vibration
       const flapRate = this.flapSpeed * (reactiveAudioLevel > 0.05 ? 1.6 : 1.0);
@@ -375,8 +387,8 @@ export class Mosquito {
         this.gltfRightWing.rotation.z = -flap;
       }
       if (this.gltfModel) {
-        this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.12;
-        this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.03;
+        this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.08;
+        this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.02;
       }
 
       this.currentOpacity = 1.0;
@@ -442,7 +454,7 @@ export class Mosquito {
     }
     this.wasInView = isInView;
 
-    // --- 2. Broad Tangential & Vertical Sweeping Trajectory ---
+    // --- 2. Dynamic flight patrol & micro-revoloteo ---
     const toNest = this.nestPosition.clone().sub(playerPos);
     const nestDir = toNest.clone().normalize();
     const tangentDir = new THREE.Vector3(-nestDir.z, 0, nestDir.x).normalize();
@@ -450,12 +462,12 @@ export class Mosquito {
 
     const rad = this.nestRadius;
     const tangentOffset =
-      Math.sin(t * this.freqX1 + this.phaseX) * (rad * 1.25) +
-      Math.cos(t * this.freqX2) * (rad * 0.45);
+      Math.sin(t * this.freqX1 + this.phaseX) * (rad * 1.3) +
+      Math.cos(t * this.freqX2) * (rad * 0.4);
     const verticalOffset =
-      Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.75) +
-      Math.cos(t * this.freqY2) * 0.55;
-    const radialOffset = Math.cos(t * this.freqZ1 + this.phaseZ) * (rad * 0.4);
+      Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.65) +
+      Math.cos(t * this.freqY2) * 0.45;
+    const radialOffset = Math.cos(t * this.freqZ1 + this.phaseZ) * (rad * 0.35);
 
     let targetPos = this.nestPosition
       .clone()
@@ -463,7 +475,15 @@ export class Mosquito {
       .addScaledVector(upDir, verticalOffset)
       .addScaledVector(nestDir, radialOffset);
 
-    // --- 3. Darting Acceleration & Zigzags ---
+    // Add high-frequency insect hover vibration (revoloteo micro-oscillation)
+    const flutterY = Math.sin(t * cfg.movement.flutterFreq) * cfg.movement.flutterAmp;
+    const flutterX = Math.cos(t * (cfg.movement.flutterFreq * 0.85)) * (cfg.movement.flutterAmp * 0.8);
+    const flutterZ = Math.sin(t * (cfg.movement.flutterFreq * 1.15)) * (cfg.movement.flutterAmp * 0.8);
+    targetPos.x += flutterX;
+    targetPos.y += flutterY;
+    targetPos.z += flutterZ;
+
+    // Frequent insect darts (quiebres rápidos de dirección)
     this.dartTimer += delta;
     if (!this.isDarting && this.dartTimer >= this.nextDartInterval) {
       this.isDarting = true;
@@ -474,9 +494,9 @@ export class Mosquito {
         cfg.movement.dartMinInterval +
         Math.random() * (cfg.movement.dartMaxInterval - cfg.movement.dartMinInterval);
       this.dartOffset.set(
-        (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 0.25,
-        (Math.random() - 0.5) * 0.5
+        (Math.random() - 0.5) * 0.65,
+        (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.65
       );
     }
 
@@ -494,9 +514,8 @@ export class Mosquito {
     const distToTarget = desiredDir.length();
     if (distToTarget > 0.001) desiredDir.normalize();
 
-    let nominalSpeed = this.baseSpeed * speedMultiplier * Math.min(2.0, Math.max(0.6, distToTarget * 1.2));
+    let nominalSpeed = this.baseSpeed * speedMultiplier * Math.min(2.2, Math.max(0.7, distToTarget * 1.4));
 
-    // Clamping angular speed in view
     if (isInView) {
       nominalSpeed *= cfg.movement.inViewSpeedDamp;
       const maxLinearSpeed = distToCamera * (cfg.movement.maxAngularSpeedDeg * (Math.PI / 180));
@@ -507,21 +526,59 @@ export class Mosquito {
     const targetVel = desiredDir.multiplyScalar(this.currentSpeed);
     this.flightVelocity.lerp(targetVel, delta * cfg.movement.turnSmoothing);
 
+    // Camera repel force: keep mosquito from sticking right against screen
     if (distToCamera < cfg.movement.cameraRepelDistance) {
       const repelDir = this.group.position.clone().sub(playerPos).normalize();
       const repelForce = (cfg.movement.cameraRepelDistance - distToCamera) * 3.5;
       this.flightVelocity.addScaledVector(repelDir, repelForce);
     }
 
-    this.group.position.addScaledVector(this.flightVelocity, delta);
-
-    if (this.flightVelocity.lengthSq() > 0.0001) {
-      this.group.lookAt(this.group.position.clone().add(this.flightVelocity));
-      this.group.rotation.z = -this.flightVelocity.x * 0.15;
+    // Inter-mosquito separation force: prevent mosquitoes from clumping together
+    if (otherMosquitoes) {
+      for (const other of otherMosquitoes) {
+        if (other === this || other.isDead) continue;
+        const d = this.group.position.distanceTo(other.group.position);
+        if (d < cfg.movement.minMosquitoSeparation && d > 0.001) {
+          const pushDir = this.group.position.clone().sub(other.group.position).normalize();
+          const pushForce = (cfg.movement.minMosquitoSeparation - d) * 2.8;
+          this.flightVelocity.addScaledVector(pushDir, pushForce);
+        }
+      }
     }
 
+    this.group.position.addScaledVector(this.flightVelocity, delta);
+
+    // --- 3. STRICT UPRIGHT ROTATION ("Tienen un lado que respetar") ---
+    // The mosquito's back ALWAYS points UP (+Y), legs DOWN (-Y), head facing flight heading (-Z).
+    // NO tumbling, NO upside-down flips, NO chaotic rolling!
+    const horizontalSpeed = Math.hypot(this.flightVelocity.x, this.flightVelocity.z);
+
+    if (horizontalSpeed > 0.015) {
+      // In Three.js forward is -Z. Math.atan2(-vel.x, -vel.z) gives yaw facing travel direction
+      const desiredYaw = Math.atan2(-this.flightVelocity.x, -this.flightVelocity.z);
+
+      let diffYaw = desiredYaw - this.currentYaw;
+      while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+      while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+
+      const turnStep = diffYaw * Math.min(1.0, delta * 9.5);
+      this.currentYaw += turnStep;
+      this.angularTurnRate = turnStep / Math.max(0.001, delta);
+    }
+
+    // Pitch angle: Pitch slightly forward when descending, slightly up when ascending (capped at 14 degrees)
+    const targetPitch = Math.max(-0.25, Math.min(0.25, -this.flightVelocity.y * 0.4));
+    this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, targetPitch, delta * 7.5);
+
+    // Roll / Bank angle: subtle banking into horizontal turns (capped at 10 degrees)
+    const targetRoll = Math.max(-0.18, Math.min(0.18, -this.angularTurnRate * 0.15));
+    this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, targetRoll, delta * 6.5);
+
+    // Apply strict upright rotation in order 'YXZ' (Yaw first, then Pitch, then Bank Roll)
+    this.group.rotation.set(this.currentPitch, this.currentYaw, this.currentRoll, 'YXZ');
+
     // Wing flapping animation
-    const flapRate = this.flapSpeed * (this.isDarting ? 1.3 : 1.0);
+    const flapRate = this.flapSpeed * (this.isDarting ? 1.35 : 1.0);
     const flap = Math.sin(t * flapRate) * 0.85;
 
     if (this.leftWing && this.rightWing) {
@@ -533,7 +590,7 @@ export class Mosquito {
       this.gltfRightWing.rotation.z = -flap;
     }
     if (this.gltfModel) {
-      this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.1;
+      this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.08;
       this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.02;
     }
 
@@ -582,13 +639,6 @@ export class Mosquito {
       this.trailPoints = [];
       this.updateTrailGeometry();
     }
-
-    if (this.isBoss && reactiveAudioLevel > 0.05) {
-      const shakeAmt = reactiveAudioLevel * 0.25;
-      this.group.position.x += (Math.random() - 0.5) * shakeAmt;
-      this.group.position.y += (Math.random() - 0.5) * shakeAmt;
-      this.group.position.z += (Math.random() - 0.5) * shakeAmt;
-    }
   }
 
   private updateTrailGeometry() {
@@ -620,6 +670,9 @@ export class Mosquito {
     this.group.position.copy(this.nestPosition);
     this.flightVelocity.set(0, 0, 0);
     this.currentOpacity = 0.0;
+    this.currentYaw = Math.random() * Math.PI * 2;
+    this.currentPitch = 0;
+    this.currentRoll = 0;
     this.trailPoints = [];
     this.updateTrailGeometry();
     for (const mat of this.materials) {

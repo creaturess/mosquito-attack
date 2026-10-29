@@ -280,52 +280,43 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           mosquitoIds: [bossMos.id],
         });
       } else {
-        // Levels 1 & 2: 6 fixed nests distributed 360 degrees
-        const totalNests = cfg.nests.count;
-        for (let i = 0; i < totalNests; i++) {
-          const baseAngle = (i / totalNests) * Math.PI * 2;
-          const angle = baseAngle + (Math.random() - 0.5) * 0.35;
+        // Levels 1 & 2: Wide 360-degree spread, strictly 1 mosquito per sector so they NEVER spawn together
+        const totalMosquitoes = currentLvl === 1 ? 6 : 8;
+        for (let i = 0; i < totalMosquitoes; i++) {
+          const baseAngle = (i / totalMosquitoes) * Math.PI * 2;
+          const angle = baseAngle + (Math.random() - 0.5) * 0.25;
           const dist =
             cfg.nests.minDistance +
-            Math.random() * (cfg.nests.maxDistance - cfg.nests.minDistance);
-          const height =
-            cfg.nests.minHeight +
-            Math.random() * (cfg.nests.maxHeight - cfg.nests.minHeight);
+            (i % 3 === 0 ? 0.2 : i % 3 === 1 ? 1.2 : 2.0) +
+            Math.random() * 0.6;
+          // Stagger heights so they don't share elevation (from 0.8m to 2.8m)
+          const height = 0.8 + ((i * 0.45) % 2.0) + Math.random() * 0.2;
           const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-          const nestRadius =
-            cfg.nests.minSweepRadius +
-            Math.random() * (cfg.nests.maxSweepRadius - cfg.nests.minSweepRadius);
+          const nestRadius = 2.4 + Math.random() * 1.4;
           const nestId = `nest_${i + 1}`;
+          const id = `mosquito_${nextMosquitoId++}`;
+          const speed = currentLvl === 1 ? cfg.movement.baseSpeedLvl1 : cfg.movement.baseSpeedLvl2;
+          const scale = currentLvl === 1 ? cfg.visibility.lvl1Scale : cfg.visibility.lvl2Scale;
 
-          const mosPerNest = currentLvl === 1 ? (i % 3 === 0 ? 2 : 1) : (i % 2 === 0 ? 2 : 1);
-          const assignedIds: string[] = [];
+          const mos = new Mosquito({
+            id,
+            nestId,
+            nestPosition: nestPos,
+            nestRadius,
+            scale,
+            speed,
+            level: currentLvl,
+          });
 
-          for (let m = 0; m < mosPerNest; m++) {
-            const id = `mosquito_${nextMosquitoId++}`;
-            assignedIds.push(id);
-            const speed =
-              currentLvl === 1 ? cfg.movement.baseSpeedLvl1 : cfg.movement.baseSpeedLvl2;
-
-            const mos = new Mosquito({
-              id,
-              nestId,
-              nestPosition: nestPos,
-              nestRadius,
-              scale: cfg.visibility.baseScale,
-              speed,
-              level: currentLvl,
-            });
-
-            scene.add(mos.group);
-            scene.add(mos.trailLine);
-            mosquitoes.push(mos);
-          }
+          scene.add(mos.group);
+          scene.add(mos.trailLine);
+          mosquitoes.push(mos);
 
           nests.push({
             id: nestId,
             position: nestPos,
             radius: nestRadius,
-            mosquitoIds: assignedIds,
+            mosquitoIds: [id],
           });
         }
       }
@@ -604,7 +595,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               audio.volume,
               cameraMatrixInverse,
               camera.aspect,
-              camForward
+              camForward,
+              mosquitoes
             );
 
             // Calculate spatial audio position relative to camera view

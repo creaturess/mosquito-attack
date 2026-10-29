@@ -16,14 +16,20 @@ export const GAMEPLAY_CONFIG = {
     /** Distancia en metros para opacidad 100% (siempre 1.0 sólido a toda distancia) */
     fullOpacityDistance: 99.0,
 
-    /** Escala base del modelo 3D (aumentado para que se vea claro a 5m-7.5m y ocupe 60-90px) */
-    baseScale: 3.4,
+    /** Escala base del mosquito en Nivel 1 (más pequeño, realista como insecto volador) */
+    lvl1Scale: 1.05,
+
+    /** Escala base del mosquito en Nivel 2 */
+    lvl2Scale: 1.3,
+
+    /** Escala base por defecto */
+    baseScale: 1.05,
 
     /** Escala del jefe gigante (Nivel 3) */
-    bossScale: 5.6,
+    bossScale: 4.8,
 
     /** Escala mínima garantizada (clamp) a cualquier distancia visible: evita que se vuelva un puntito */
-    minScaleFactor: 0.82,
+    minScaleFactor: 0.85,
 
     /** Grosor y brillo del reborde/silueta para contraste contra fondos oscuros y claros */
     outlineScale: 1.14,
@@ -31,38 +37,47 @@ export const GAMEPLAY_CONFIG = {
   },
 
   // ==========================================
-  // 2. VELOCIDAD Y MOVIMIENTO (BARRIDOS A TRAVÉS DE LA PANTALLA)
+  // 2. VELOCIDAD Y MOVIMIENTO (REVOLOTEO REALISTA DE INSECTO)
   // ==========================================
   movement: {
     /** Velocidad base de vuelo en m/s en Nivel 1 */
-    baseSpeedLvl1: 0.36,
+    baseSpeedLvl1: 0.42,
 
     /** Velocidad base de vuelo en m/s en Nivel 2 */
-    baseSpeedLvl2: 0.46,
+    baseSpeedLvl2: 0.55,
 
     /** Límite de velocidad angular cuando está a la vista del jugador (grados por segundo en pantalla) */
-    maxAngularSpeedDeg: 70,
+    maxAngularSpeedDeg: 85,
 
-    /** Factor de suavizado inercial en giros (mayor número = curvas más suaves, nunca giros secos) */
-    turnSmoothing: 2.2,
+    /** Suavizado de giro */
+    turnSmoothing: 4.5,
 
-    /** Reducción de velocidad cuando el mosquito está dentro del campo de visión para facilitar el tracking */
-    inViewSpeedDamp: 0.85,
+    /** Reducción de velocidad cuando el mosquito está dentro del campo de visión */
+    inViewSpeedDamp: 0.88,
 
-    /** Tiempo máximo de duración de los picos de aceleración / zigzags rápidos en segundos (< 0.3s) */
-    dartDuration: 0.2,
+    /** Frecuencia de micro-revoloteo/vibración de vuelo (Hz) */
+    flutterFreq: 15.0,
 
-    /** Multiplicador de velocidad durante el pico de aceleración (acotado y suave) */
-    dartSpeedMultiplier: 1.45,
+    /** Amplitud de micro-revoloteo en metros (pequeños temblores y oscilaciones realistas de vuelo) */
+    flutterAmp: 0.05,
 
-    /** Intervalo mínimo entre aceleraciones (segundos) - poco frecuentes */
-    dartMinInterval: 5.0,
+    /** Intervalo mínimo entre quiebres erráticos de dirección (segundos) */
+    dartMinInterval: 0.5,
 
-    /** Intervalo máximo entre aceleraciones (segundos) */
-    dartMaxInterval: 8.5,
+    /** Intervalo máximo entre quiebres erráticos de dirección (segundos) */
+    dartMaxInterval: 1.3,
+
+    /** Multiplicador de velocidad durante un pique o quiebre errático */
+    dartSpeedMultiplier: 1.65,
+
+    /** Duración del pique errático (segundos) */
+    dartDuration: 0.22,
 
     /** Distancia mínima de seguridad a la cámara para que nunca se pegue a la pantalla */
-    cameraRepelDistance: 3.0,
+    cameraRepelDistance: 2.8,
+
+    /** Distancia mínima de separación entre mosquitos para evitar que aparezcan o vuelen juntos */
+    minMosquitoSeparation: 2.6,
   },
 
   // ==========================================
