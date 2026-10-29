@@ -34,9 +34,9 @@ export class BladeSwipeDetector {
   private points: SwipePoint[] = [];
 
   // Key adjustable parameters
-  public trailLifetimeMs: number = 160;  // How long the blade trail persists (ms)
-  public minSwipeSpeed: number = 220;    // Min speed in px/s to trigger a valid slice
-  public minSegmentLength: number = 8;    // Min pixel length per segment
+  public trailLifetimeMs: number = 180;  // How long the blade trail persists (ms)
+  public minSwipeSpeed: number = 120;    // Min speed in px/s to trigger a valid slice
+  public minSegmentLength: number = 5;    // Min pixel length per segment
   public coreColor: string = '#ffffff';  // Blade core color
   public glowColor: string = '#38bdf8';  // Neon blade glow color
 

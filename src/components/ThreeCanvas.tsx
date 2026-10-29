@@ -337,91 +337,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
     initLevelSpawns();
 
-    // --- 6. Raycasting for Touch / Mouse Swatting ---
-    const raycaster = new THREE.Raycaster();
-    const mousePos = new THREE.Vector2();
-
-    const handleSwat = (clientX: number, clientY: number) => {
-      if (!stateRef.current.isPlaying) return;
-
-      mousePos.x = (clientX / window.innerWidth) * 2 - 1;
-      mousePos.y = -(clientY / window.innerHeight) * 2 + 1;
-
-      raycaster.setFromCamera(mousePos, camera);
-
-      const hitObjects: THREE.Object3D[] = [];
-      mosquitoes.forEach((m) => {
-        if (!m.isDead) {
-          hitObjects.push(m.hitSphere);
-        }
-      });
-
-      const intersects = raycaster.intersectObjects(hitObjects, true);
-
-      let hitTarget: Mosquito | null = null;
-      let hitPoint: THREE.Vector3 = new THREE.Vector3();
-
-      if (intersects.length > 0) {
-        const hitSphere = intersects[0].object as THREE.Mesh;
-        const mosquitoId = hitSphere.userData?.mosquitoId;
-        hitTarget = mosquitoes.find((m) => m.id === mosquitoId && !m.isDead) || null;
-        if (hitTarget) {
-          hitPoint.copy(intersects[0].point);
-        }
-      }
-
-      // Screen-space proximity fallback with generous tolerance
-      if (!hitTarget) {
-        let bestDistancePx = GAMEPLAY_CONFIG.trackingAid.screenTouchTolerancePx;
-        const screenPos = new THREE.Vector3();
-
-        for (const mos of mosquitoes) {
-          if (mos.isDead) continue;
-          screenPos.setFromMatrixPosition(mos.group.matrixWorld);
-
-          const viewPos = screenPos.clone().applyMatrix4(camera.matrixWorldInverse);
-          if (viewPos.z >= -0.15) continue;
-
-          screenPos.project(camera);
-          if (screenPos.z > 1.0 || screenPos.z < -1.0) continue;
-
-          const mosScreenX = ((screenPos.x + 1) * window.innerWidth) / 2;
-          const mosScreenY = ((-screenPos.y + 1) * window.innerHeight) / 2;
-
-          const distPx = Math.hypot(clientX - mosScreenX, clientY - mosScreenY);
-          if (distPx < bestDistancePx) {
-            bestDistancePx = distPx;
-            hitTarget = mos;
-            hitPoint.setFromMatrixPosition(mos.group.matrixWorld);
-          }
-        }
-      }
-
-      if (hitTarget) {
-        if (hitTarget.isBoss) {
-          buzzManager.playBossHurtSfx();
-          sensorManager.triggerHaptic('bossHit');
-          particles.emitSplat(hitPoint, true);
-        } else {
-          hitTarget.kill();
-          buzzManager.stopMosquitoBuzz(hitTarget.id);
-          buzzManager.playSwatSfx();
-          sensorManager.triggerHaptic('swat');
-          particles.emitSplat(hitPoint, false);
-
-          currentKills++;
-          onKillRef.current(currentKills, false);
-
-          if (stateRef.current.currentLevel < 3 && currentKills >= stateRef.current.targetKills) {
-            buzzManager.playVictorySfx();
-            sensorManager.triggerHaptic('victory');
-            onLevelCompleteRef.current();
-          }
-        }
-      } else {
-        buzzManager.playSwatSfx(false);
-      }
-    };
+    // --- 6. Fruit Ninja Slicing Interaction ---
+    let isSlicing = false;
 
     const handleSliceHit = (hit: SliceHitResult) => {
       const mos = mosquitoes.find((m) => m.id === hit.targetId && !m.isDead);
@@ -447,7 +364,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         }
       );
 
-      // 2. Kill original mosquito instance
+      // 2. Kill original mosquito instance immediately
       mos.kill();
       buzzManager.stopMosquitoBuzz(mos.id);
       buzzManager.playSliceSfx();
@@ -464,13 +381,47 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       }
     };
 
-    let isDragging = false;
-    let pointerStartX = 0;
-    let pointerStartY = 0;
-    let prevPointer = { x: 0, y: 0 };
-    let hasMovedSignificantly = false;
+    const processSliceAt = (clientX: number, clientY: number) => {
+      bladeDetector.addPoint(clientX, clientY);
 
-    const onPointerDown = (e: PointerEvent) => {
+      if (!stateRef.current.isPlaying) return;
+
+      const screenTargets: MosquitoScreenTarget[] = [];
+      const tempVec = new THREE.Vector3();
+
+      for (const mos of mosquitoes) {
+        if (mos.isDead) continue;
+        tempVec.setFromMatrixPosition(mos.group.matrixWorld);
+
+        // Discard behind camera
+        const viewPos = tempVec.clone().applyMatrix4(camera.matrixWorldInverse);
+        if (viewPos.z >= -0.15) continue;
+
+        tempVec.project(camera);
+        if (tempVec.z > 1.0 || tempVec.z < -1.0) continue;
+
+        const screenX = ((tempVec.x + 1) * window.innerWidth) / 2;
+        const screenY = ((-tempVec.y + 1) * window.innerHeight) / 2;
+
+        screenTargets.push({
+          id: mos.id,
+          screenX,
+          screenY,
+          radiusPx: mos.isBoss ? 160 : 75,
+          isDead: mos.isDead,
+          userData: mos,
+        });
+      }
+
+      const hits = bladeDetector.checkIntersections(screenTargets);
+      for (const hit of hits) {
+        handleSliceHit(hit);
+      }
+    };
+
+    // Touch event handlers with mandatory e.preventDefault() to strictly eliminate screen scroll & drag
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
       const targetEl = e.target as HTMLElement | null;
       if (
         targetEl &&
@@ -480,89 +431,65 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       ) {
         return;
       }
-      isDragging = true;
-      hasMovedSignificantly = false;
-      pointerStartX = e.clientX;
-      pointerStartY = e.clientY;
-      prevPointer = { x: e.clientX, y: e.clientY };
-      bladeDetector.addPoint(e.clientX, e.clientY);
-    };
-
-    const onPointerMove = (e: PointerEvent) => {
-      if (!isDragging) return;
-
-      const deltaX = e.clientX - prevPointer.x;
-      const deltaY = e.clientY - prevPointer.y;
-      const totalDist = Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY);
-      if (totalDist > 8) {
-        hasMovedSignificantly = true;
-      }
-
-      bladeDetector.addPoint(e.clientX, e.clientY);
-
-      // Screen-space targets for slicing
-      if (stateRef.current.isPlaying) {
-        const screenTargets: MosquitoScreenTarget[] = [];
-        const tempVec = new THREE.Vector3();
-
-        for (const mos of mosquitoes) {
-          if (mos.isDead) continue;
-          tempVec.setFromMatrixPosition(mos.group.matrixWorld);
-
-          const viewPos = tempVec.clone().applyMatrix4(camera.matrixWorldInverse);
-          if (viewPos.z >= -0.15) continue;
-
-          tempVec.project(camera);
-          if (tempVec.z > 1.0 || tempVec.z < -1.0) continue;
-
-          const screenX = ((tempVec.x + 1) * window.innerWidth) / 2;
-          const screenY = ((-tempVec.y + 1) * window.innerHeight) / 2;
-
-          screenTargets.push({
-            id: mos.id,
-            screenX,
-            screenY,
-            radiusPx: mos.isBoss ? 160 : 75,
-            isDead: mos.isDead,
-            userData: mos,
-          });
-        }
-
-        const hits = bladeDetector.checkIntersections(screenTargets);
-        for (const hit of hits) {
-          handleSliceHit(hit);
-        }
-      }
-
-      // Smooth camera pan during gentle drags
-      const instantSpeed = Math.hypot(deltaX, deltaY);
-      if (instantSpeed < 45) {
-        sensorManager.addManualLook(-deltaX * 0.0055, -deltaY * 0.0055);
-      }
-
-      prevPointer = { x: e.clientX, y: e.clientY };
-    };
-
-    const onPointerUp = (e: PointerEvent) => {
-      if (isDragging) {
-        isDragging = false;
-        bladeDetector.endStroke();
-        // If user tapped without dragging, trigger swat at touch point
-        if (!hasMovedSignificantly) {
-          handleSwat(e.clientX, e.clientY);
-        }
+      isSlicing = true;
+      if (e.touches.length > 0) {
+        processSliceAt(e.touches[0].clientX, e.touches[0].clientY);
       }
     };
 
-    const onPointerCancel = () => {
-      isDragging = false;
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (!isSlicing) return;
+      if (e.touches.length > 0) {
+        processSliceAt(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      isSlicing = false;
       bladeDetector.endStroke();
     };
 
-    window.addEventListener('pointerdown', onPointerDown as unknown as EventListener);
-    window.addEventListener('pointermove', onPointerMove as unknown as EventListener);
-    window.addEventListener('pointerup', onPointerUp as unknown as EventListener);
-    window.addEventListener('pointercancel', onPointerCancel as unknown as EventListener);
+    const onTouchCancel = (e: TouchEvent) => {
+      e.preventDefault();
+      isSlicing = false;
+      bladeDetector.endStroke();
+    };
+
+    // Mouse event handlers for desktop testing
+    const onMouseDown = (e: MouseEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        targetEl &&
+        (targetEl.closest('[data-no-swat]') ||
+          targetEl.closest('button') ||
+          targetEl.closest('input'))
+      ) {
+        return;
+      }
+      isSlicing = true;
+      processSliceAt(e.clientX, e.clientY);
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isSlicing) return;
+      processSliceAt(e.clientX, e.clientY);
+    };
+
+    const onMouseUp = () => {
+      isSlicing = false;
+      bladeDetector.endStroke();
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: false });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', onTouchCancel, { passive: false });
+
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
 
     // --- 7. Keyboard Navigation & F3 for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -829,10 +756,15 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     // --- Cleanup ---
     return () => {
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('pointerdown', onPointerDown as unknown as EventListener);
-      window.removeEventListener('pointermove', onPointerMove as unknown as EventListener);
-      window.removeEventListener('pointerup', onPointerUp as unknown as EventListener);
-      window.removeEventListener('pointercancel', onPointerCancel as unknown as EventListener);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchCancel);
+
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);
@@ -843,9 +775,21 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
-      <canvas ref={bladeCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none touch-none" />
+    <div
+      ref={containerRef}
+      className="absolute inset-0 h-full w-full overflow-hidden select-none touch-none"
+      style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full touch-none select-none"
+        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+      />
+      <canvas
+        ref={bladeCanvasRef}
+        className="absolute inset-0 h-full w-full pointer-events-none touch-none select-none"
+        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+      />
     </div>
   );
 };
