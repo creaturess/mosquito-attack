@@ -37,37 +37,6 @@ interface UIOverlayProps {
 export const UIOverlay: React.FC<UIOverlayProps> = ({
   gameState,
 }) => {
-  const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
-
-  // Screen click/tap slap visual feedback
-  useEffect(() => {
-    const handleTap = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.closest('[data-no-swat]') ||
-          target.closest('button') ||
-          target.closest('input'))
-      ) {
-        return;
-      }
-
-      let x = 0;
-      let y = 0;
-      if ('touches' in e && e.touches.length > 0) {
-        x = e.touches[0].clientX;
-        y = e.touches[0].clientY;
-      } else if ('clientX' in e) {
-        x = e.clientX;
-        y = e.clientY;
-      }
-      setSwatEffect({ x, y });
-      setTimeout(() => setSwatEffect(null), 200);
-    };
-
-    window.addEventListener('click', handleTap);
-    return () => window.removeEventListener('click', handleTap);
-  }, []);
 
   const timerColor =
     gameState.timeLeft <= 5
@@ -118,15 +87,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       </div>
 
-      {/* --- TAP FEEDBACK RETICLE --- */}
-      {swatEffect && (
-        <div
-          className="pointer-events-none fixed -translate-x-1/2 -translate-y-1/2"
-          style={{ left: swatEffect.x, top: swatEffect.y }}
-        >
-          <div className="h-10 w-10 rounded-full border-2 border-white/60 bg-white/10 animate-ping" />
-        </div>
-      )}
 
       {/* --- BOTTOM ROW: SCREAM BUTTON (LEVEL 3) --- */}
       <div className="flex items-end justify-end w-full pointer-events-auto">
