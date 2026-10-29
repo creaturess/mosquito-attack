@@ -476,20 +476,12 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         targetEl &&
         (targetEl.closest('[data-no-swat]') ||
           targetEl.closest('button') ||
-          targetEl.closest('input') ||
-          targetEl.closest('[role="dialog"]') ||
-          targetEl.closest('.modal-container'))
+          targetEl.closest('input'))
       ) {
         return;
       }
-
-      if (!stateRef.current.isPlaying) return;
-
-      if (e.cancelable) {
-        e.preventDefault();
-      }
-
       isDragging = true;
+      hasMovedSignificantly = false;
       pointerStartX = e.clientX;
       pointerStartY = e.clientY;
       prevPointer = { x: e.clientX, y: e.clientY };
@@ -497,47 +489,57 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!isDragging || !stateRef.current.isPlaying) return;
+      if (!isDragging) return;
 
-      if (e.cancelable) {
-        e.preventDefault();
+      const deltaX = e.clientX - prevPointer.x;
+      const deltaY = e.clientY - prevPointer.y;
+      const totalDist = Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY);
+      if (totalDist > 8) {
+        hasMovedSignificantly = true;
       }
 
       bladeDetector.addPoint(e.clientX, e.clientY);
 
       // Screen-space targets for slicing
-      const screenTargets: MosquitoScreenTarget[] = [];
-      const tempVec = new THREE.Vector3();
+      if (stateRef.current.isPlaying) {
+        const screenTargets: MosquitoScreenTarget[] = [];
+        const tempVec = new THREE.Vector3();
 
-      for (const mos of mosquitoes) {
-        if (mos.isDead) continue;
-        tempVec.setFromMatrixPosition(mos.group.matrixWorld);
+        for (const mos of mosquitoes) {
+          if (mos.isDead) continue;
+          tempVec.setFromMatrixPosition(mos.group.matrixWorld);
 
-        const viewPos = tempVec.clone().applyMatrix4(camera.matrixWorldInverse);
-        if (viewPos.z >= -0.15) continue;
+          const viewPos = tempVec.clone().applyMatrix4(camera.matrixWorldInverse);
+          if (viewPos.z >= -0.15) continue;
 
-        tempVec.project(camera);
-        if (tempVec.z > 1.0 || tempVec.z < -1.0) continue;
+          tempVec.project(camera);
+          if (tempVec.z > 1.0 || tempVec.z < -1.0) continue;
 
-        const screenX = ((tempVec.x + 1) * window.innerWidth) / 2;
-        const screenY = ((-tempVec.y + 1) * window.innerHeight) / 2;
+          const screenX = ((tempVec.x + 1) * window.innerWidth) / 2;
+          const screenY = ((-tempVec.y + 1) * window.innerHeight) / 2;
 
-        screenTargets.push({
-          id: mos.id,
-          screenX,
-          screenY,
-          radiusPx: mos.isBoss ? 160 : 75,
-          isDead: mos.isDead,
-          userData: mos,
-        });
+          screenTargets.push({
+            id: mos.id,
+            screenX,
+            screenY,
+            radiusPx: mos.isBoss ? 160 : 75,
+            isDead: mos.isDead,
+            userData: mos,
+          });
+        }
+
+        const hits = bladeDetector.checkIntersections(screenTargets);
+        for (const hit of hits) {
+          handleSliceHit(hit);
+        }
       }
 
-      const hits = bladeDetector.checkIntersections(screenTargets);
-      for (const hit of hits) {
-        handleSliceHit(hit);
+      // Smooth camera pan during gentle drags
+      const instantSpeed = Math.hypot(deltaX, deltaY);
+      if (instantSpeed < 45) {
+        sensorManager.addManualLook(-deltaX * 0.0055, -deltaY * 0.0055);
       }
 
-      // Zero screen/camera dragging during slicing: canvas stays stable
       prevPointer = { x: e.clientX, y: e.clientY };
     };
 
@@ -545,7 +547,10 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       if (isDragging) {
         isDragging = false;
         bladeDetector.endStroke();
-        // Slicing exclusive: tapping does NOT swat or kill mosquitoes
+        // If user tapped without dragging, trigger swat at touch point
+        if (!hasMovedSignificantly) {
+          handleSwat(e.clientX, e.clientY);
+        }
       }
     };
 
@@ -554,17 +559,10 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       bladeDetector.endStroke();
     };
 
-    const onWindowTouchMove = (e: TouchEvent) => {
-      if (stateRef.current.isPlaying && e.cancelable) {
-        e.preventDefault();
-      }
-    };
-
     window.addEventListener('pointerdown', onPointerDown as unknown as EventListener);
     window.addEventListener('pointermove', onPointerMove as unknown as EventListener);
     window.addEventListener('pointerup', onPointerUp as unknown as EventListener);
     window.addEventListener('pointercancel', onPointerCancel as unknown as EventListener);
-    window.addEventListener('touchmove', onWindowTouchMove, { passive: false });
 
     // --- 7. Keyboard Navigation & F3 for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -835,7 +833,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       window.removeEventListener('pointermove', onPointerMove as unknown as EventListener);
       window.removeEventListener('pointerup', onPointerUp as unknown as EventListener);
       window.removeEventListener('pointercancel', onPointerCancel as unknown as EventListener);
-      window.removeEventListener('touchmove', onWindowTouchMove);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);
@@ -846,9 +843,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden touch-none select-none">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none select-none" />
-      <canvas ref={bladeCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none touch-none select-none" />
+    <div ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
+      <canvas ref={bladeCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none touch-none" />
     </div>
   );
 };
