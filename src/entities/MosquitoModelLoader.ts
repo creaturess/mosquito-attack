@@ -1,12 +1,12 @@
 /**
  * MosquitoModelLoader.ts
- * Manages asynchronous loading, centering, scaling, and caching
- * of the 3D mosquito GLTF asset from public/assets/scene.gltf and src/assets/scene.gltf.
+ * Manages loading, centering, orientation, and caching of the new 3D mosquito character
+ * from public/assets/8342f1f2-a89c-4c3d-905c-3b9dd942498a.glb.
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import sceneGltfUrl from '../assets/scene.gltf?url';
+import mosquitoGlbUrl from '../assets/8342f1f2-a89c-4c3d-905c-3b9dd942498a.glb?url';
 
 type ModelLoadCallback = (template: THREE.Group) => void;
 
@@ -40,18 +40,17 @@ class MosquitoModelLoader {
     if (this.isLoading || this.baseTemplate) return;
     this.isLoading = true;
 
-    // Prioritize public and Vite-resolved gltf assets
+    // Load the new 3D mosquito character
     const candidateUrls = [
-      sceneGltfUrl,
-      '/assets/scene.gltf',
-      '/public/assets/scene.gltf',
-      '/src/assets/scene.gltf',
-      'src/assets/scene.gltf',
+      mosquitoGlbUrl,
+      '/assets/8342f1f2-a89c-4c3d-905c-3b9dd942498a.glb',
+      '/public/assets/8342f1f2-a89c-4c3d-905c-3b9dd942498a.glb',
+      '/src/assets/8342f1f2-a89c-4c3d-905c-3b9dd942498a.glb',
     ];
 
     const tryLoad = (index: number) => {
       if (index >= candidateUrls.length) {
-        console.warn('[MosquitoModelLoader] All GLTF candidate URLs failed, falling back to procedural model');
+        console.warn('[MosquitoModelLoader] All GLB candidate URLs failed, using procedural fallback');
         this.isLoading = false;
         return;
       }
@@ -79,7 +78,7 @@ class MosquitoModelLoader {
     const root = new THREE.Group();
     root.name = 'Mosquito_GLTF_Root';
 
-    // Clone to work on a clean instance
+    // Clone clean instance
     const model = rawScene.clone(true);
 
     // Compute bounding box to normalize pivot & scale
@@ -90,75 +89,56 @@ class MosquitoModelLoader {
     // Center geometry so rotation pivot is inside thorax / center of mass
     model.position.sub(center);
 
+    // Orient forward flight direction along -Z
+    // In this model, the proboscis/head points along +X, wings along Z, and Y is UP.
+    // Rotating +90 degrees (+Math.PI / 2) around Y turns +X into -Z (Forward) and Z into X (Wings).
+    model.rotation.y = Math.PI / 2;
+
     // Target length is ~1.15m to match game world scale
     const maxDim = Math.max(size.x, size.y, size.z);
     const targetScale = maxDim > 0 ? 1.15 / maxDim : 1.0;
     model.scale.setScalar(targetScale);
 
-    // Sleek, high-contrast dark chitin exoskeleton
-    const standardBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x16181b,
-      roughness: 0.35,
-      metalness: 0.25,
-      side: THREE.DoubleSide,
-    });
-
-    const standardWingMat = new THREE.MeshStandardMaterial({
-      name: 'wingMat',
-      color: 0xcbe9fc,
-      roughness: 0.2,
-      metalness: 0.1,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-    });
-
-    const standardEyeMat = new THREE.MeshStandardMaterial({
-      color: 0xff3300,
-      emissive: 0xff2200,
-      emissiveIntensity: 0.9,
-      roughness: 0.2,
-      metalness: 0.1,
-    });
-
-    // Apply unified chitin material across all mesh body chunks
+    // Configure materials for maximum clarity, realistic chitin specular reflections and AR visibility
     model.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
-        mesh.material = standardBodyMat;
+
+        if (mesh.material) {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          mat.side = THREE.DoubleSide;
+          mat.roughness = 0.38;
+          mat.metalness = 0.22;
+          if (mat.map) {
+            mat.map.colorSpace = THREE.SRGBColorSpace;
+          } else {
+            mat.color.setHex(0x181a1e);
+          }
+        }
       }
     });
 
     root.add(model);
 
-    // Add delicate fluttering wings attached to thorax
-    const wingGeo = new THREE.PlaneGeometry(0.32, 0.9);
-    wingGeo.translate(0, 0.45, 0);
-    wingGeo.rotateX(Math.PI / 2);
+    // Add glowing compound eyes on the head for high visibility against all AR backgrounds
+    const eyeGeo = new THREE.SphereGeometry(0.065, 8, 8);
+    const standardEyeMat = new THREE.MeshStandardMaterial({
+      color: 0xff3300,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.95,
+      roughness: 0.2,
+      metalness: 0.1,
+    });
 
-    const leftWing = new THREE.Mesh(wingGeo, standardWingMat);
-    leftWing.name = 'Mosquito_LeftWing';
-    leftWing.position.set(-0.12, 0.16, 0.02);
-    leftWing.rotation.y = 0.45;
-
-    const rightWing = new THREE.Mesh(wingGeo, standardWingMat);
-    rightWing.name = 'Mosquito_RightWing';
-    rightWing.position.set(0.12, 0.16, 0.02);
-    rightWing.rotation.y = -0.45;
-
-    root.add(leftWing, rightWing);
-
-    // Glowing compound eyes on the head
-    const eyeGeo = new THREE.SphereGeometry(0.075, 8, 8);
     const leftEye = new THREE.Mesh(eyeGeo, standardEyeMat);
     leftEye.name = 'Mosquito_LeftEye';
-    leftEye.position.set(-0.08, 0.08, -0.38);
+    leftEye.position.set(-0.07, 0.05, -0.42);
 
     const rightEye = new THREE.Mesh(eyeGeo, standardEyeMat);
     rightEye.name = 'Mosquito_RightEye';
-    rightEye.position.set(0.08, 0.08, -0.38);
+    rightEye.position.set(0.07, 0.05, -0.42);
 
     root.add(leftEye, rightEye);
 
@@ -168,42 +148,26 @@ class MosquitoModelLoader {
     this.bossTemplate = root.clone(true);
     this.bossTemplate.name = 'Mosquito_GLTF_Boss';
 
-    const bossBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x2e0614,
-      roughness: 0.3,
-      metalness: 0.4,
-      emissive: 0x480618,
-      emissiveIntensity: 0.45,
-      side: THREE.DoubleSide,
-    });
-
-    const bossWingMat = new THREE.MeshStandardMaterial({
-      name: 'wingMat',
-      color: 0xf472b6,
-      roughness: 0.25,
-      metalness: 0.2,
-      transparent: true,
-      opacity: 0.88,
-      side: THREE.DoubleSide,
-    });
-
-    const bossEyeMat = new THREE.MeshStandardMaterial({
-      color: 0xff0044,
-      emissive: 0xff0033,
-      emissiveIntensity: 1.3,
-      roughness: 0.15,
-      metalness: 0.1,
-    });
-
     this.bossTemplate.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         if (mesh.name === 'Mosquito_LeftEye' || mesh.name === 'Mosquito_RightEye') {
-          mesh.material = bossEyeMat;
-        } else if (mesh.name === 'Mosquito_LeftWing' || mesh.name === 'Mosquito_RightWing') {
-          mesh.material = bossWingMat;
-        } else {
-          mesh.material = bossBodyMat;
+          mesh.material = new THREE.MeshStandardMaterial({
+            color: 0xff0044,
+            emissive: 0xff0033,
+            emissiveIntensity: 1.5,
+            roughness: 0.15,
+            metalness: 0.1,
+          });
+        } else if (mesh.material) {
+          const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
+          mat.side = THREE.DoubleSide;
+          mat.roughness = 0.32;
+          mat.metalness = 0.38;
+          mat.color.setHex(0x380616); // Deep demonic bloodstone crimson
+          mat.emissive.setHex(0x550619);
+          mat.emissiveIntensity = 0.45;
+          mesh.material = mat;
         }
       }
     });
@@ -222,7 +186,7 @@ class MosquitoModelLoader {
   }
 
   /**
-   * Returns a fresh clone of the 3D GLTF model
+   * Returns a fresh clone of the new 3D mosquito character
    */
   public createInstance(isBoss: boolean = false): THREE.Group | null {
     const template = isBoss ? this.bossTemplate : this.baseTemplate;
