@@ -15,7 +15,7 @@ import { buzzManager } from './audio/SpatialBuzzManager';
 
 const LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
   1: 60, // 60 seconds for Level 1
-  2: 50, // 50 seconds for Level 2 (20 agile mosquitoes across bedroom)
+  2: 30, // 30 seconds for Level 2
   3: 20, // 20 seconds for Level 3
 };
 

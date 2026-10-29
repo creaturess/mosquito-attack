@@ -56,7 +56,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
               <div>
                 <div className="text-[10px] text-slate-400 uppercase">Tiempo Límite</div>
                 <div className="font-mono text-sm font-bold text-amber-300">
-                  {level === 1 ? '60 seg' : level === 2 ? '50 seg' : '20 seg'}
+                  {level === 1 ? '60 seg' : level === 2 ? '30 seg' : '20 seg'}
                 </div>
               </div>
             </div>
