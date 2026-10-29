@@ -603,16 +603,20 @@ export class SensorManager {
     audio: AudioMetrics;
     status: SensorStatus;
   } {
-    // 1. Lerp orientation
+    // 1. Dynamic fast lerp orientation: instant 1:1 tracking when following fast targets
     let diffAlpha = this.rawOrientation.alpha - this.smoothedOrientation.alpha;
     if (diffAlpha > 180) diffAlpha -= 360;
     if (diffAlpha < -180) diffAlpha += 360;
-    this.smoothedOrientation.alpha += diffAlpha * this.ROT_LERP;
+
+    const rotDelta = Math.abs(diffAlpha) + Math.abs(this.rawOrientation.beta - this.smoothedOrientation.beta);
+    const dynamicRotLerp = Math.min(0.88, 0.45 + rotDelta * 0.04);
+
+    this.smoothedOrientation.alpha += diffAlpha * dynamicRotLerp;
     if (this.smoothedOrientation.alpha < 0) this.smoothedOrientation.alpha += 360;
     if (this.smoothedOrientation.alpha >= 360) this.smoothedOrientation.alpha -= 360;
 
-    this.smoothedOrientation.beta += (this.rawOrientation.beta - this.smoothedOrientation.beta) * this.ROT_LERP;
-    this.smoothedOrientation.gamma += (this.rawOrientation.gamma - this.smoothedOrientation.gamma) * this.ROT_LERP;
+    this.smoothedOrientation.beta += (this.rawOrientation.beta - this.smoothedOrientation.beta) * dynamicRotLerp;
+    this.smoothedOrientation.gamma += (this.rawOrientation.gamma - this.smoothedOrientation.gamma) * dynamicRotLerp;
 
     // Convert to Radians
     const degToRad = Math.PI / 180;

@@ -21,7 +21,7 @@ const LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
 
 const TARGET_KILLS: Record<1 | 2 | 3, number> = {
   1: 20, // 20 mosquitoes
-  2: 20, // 20 mosquitoes
+  2: 15, // 15 fast crossing mosquitoes
   3: 1,  // Final Boss
 };
 

@@ -281,7 +281,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         });
       } else {
         // Levels 1 & 2: Wide 360-degree spread, strictly 1 mosquito per sector so they NEVER spawn together
-        const totalMosquitoes = currentLvl === 1 ? 6 : 8;
+        const totalMosquitoes = currentLvl === 1 ? 6 : 10;
         for (let i = 0; i < totalMosquitoes; i++) {
           const baseAngle = (i / totalMosquitoes) * Math.PI * 2;
           const angle = baseAngle + (Math.random() - 0.5) * 0.25;
@@ -292,7 +292,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           // Stagger heights so they don't share elevation (from 0.8m to 2.8m)
           const height = 0.8 + ((i * 0.45) % 2.0) + Math.random() * 0.2;
           const nestPos = new THREE.Vector3(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-          const nestRadius = 2.4 + Math.random() * 1.4;
+          const nestRadius = currentLvl === 2 ? 4.2 + Math.random() * 1.5 : 2.4 + Math.random() * 1.2;
           const nestId = `nest_${i + 1}`;
           const id = `mosquito_${nextMosquitoId++}`;
           const speed = currentLvl === 1 ? cfg.movement.baseSpeedLvl1 : cfg.movement.baseSpeedLvl2;
@@ -412,33 +412,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       }
     };
 
-    const onPointerDown = (e: PointerEvent) => {
-      const targetEl = e.target as HTMLElement | null;
-      if (
-        targetEl &&
-        (targetEl.closest('[data-no-swat]') ||
-          targetEl.closest('button') ||
-          targetEl.closest('input') ||
-          targetEl.closest('.pointer-events-auto'))
-      ) {
-        return;
-      }
-      handleSwat(e.clientX, e.clientY);
-    };
-
     let isDragging = false;
+    let pointerStartX = 0;
+    let pointerStartY = 0;
     let prevPointer = { x: 0, y: 0 };
+    let hasMovedSignificantly = false;
 
-    const onPointerMove = (e: PointerEvent) => {
-      if (isDragging) {
-        const deltaX = e.clientX - prevPointer.x;
-        const deltaY = e.clientY - prevPointer.y;
-        sensorManager.addManualLook(-deltaX * 0.005, -deltaY * 0.005);
-        prevPointer = { x: e.clientX, y: e.clientY };
-      }
-    };
-
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       const targetEl = e.target as HTMLElement | null;
       if (
         targetEl &&
@@ -449,17 +429,43 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         return;
       }
       isDragging = true;
+      hasMovedSignificantly = false;
+      pointerStartX = e.clientX;
+      pointerStartY = e.clientY;
       prevPointer = { x: e.clientX, y: e.clientY };
     };
 
-    const onMouseUp = () => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (isDragging) {
+        const deltaX = e.clientX - prevPointer.x;
+        const deltaY = e.clientY - prevPointer.y;
+        const totalDist = Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY);
+        if (totalDist > 8) {
+          hasMovedSignificantly = true;
+        }
+        sensorManager.addManualLook(-deltaX * 0.0055, -deltaY * 0.0055);
+        prevPointer = { x: e.clientX, y: e.clientY };
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (isDragging) {
+        isDragging = false;
+        // If user tapped without dragging, trigger swat at touch point
+        if (!hasMovedSignificantly) {
+          handleSwat(e.clientX, e.clientY);
+        }
+      }
+    };
+
+    const onPointerCancel = () => {
       isDragging = false;
     };
 
     window.addEventListener('pointerdown', onPointerDown as unknown as EventListener);
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onPointerMove as unknown as EventListener);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointermove', onPointerMove as unknown as EventListener);
+    window.addEventListener('pointerup', onPointerUp as unknown as EventListener);
+    window.addEventListener('pointercancel', onPointerCancel as unknown as EventListener);
 
     // --- 7. Keyboard Navigation & F3 for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -584,7 +590,8 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               camForward
             );
 
-            if (!mos.isBoss && now - mos.deathTime > GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000) {
+            const respawnDelayMs = mos.level === 2 ? 1400 : GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000;
+            if (!mos.isBoss && now - mos.deathTime > respawnDelayMs) {
               mos.respawnAtNest();
             }
           } else {
@@ -723,8 +730,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('pointerdown', onPointerDown as unknown as EventListener);
-      window.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onPointerMove as unknown as EventListener);
+      window.removeEventListener('pointermove', onPointerMove as unknown as EventListener);
+      window.removeEventListener('pointerup', onPointerUp as unknown as EventListener);
+      window.removeEventListener('pointercancel', onPointerCancel as unknown as EventListener);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);

@@ -130,7 +130,7 @@ export class Mosquito {
       : cfg.visibility.lvl2Scale;
     this.baseScale = options.scale || defaultScale;
 
-    this.flapSpeed = this.isBoss ? 30 : this.level === 1 ? 50 : 64;
+    this.flapSpeed = this.isBoss ? 30 : this.level === 1 ? 50 : 82;
     this.timeOffset = Math.random() * 100;
 
     // Erratic Lissajous frequencies
@@ -460,14 +460,18 @@ export class Mosquito {
     const tangentDir = new THREE.Vector3(-nestDir.z, 0, nestDir.x).normalize();
     const upDir = new THREE.Vector3(0, 1, 0);
 
-    const rad = this.nestRadius;
+    const isLvl2 = this.level === 2;
+    const rad = isLvl2 ? this.nestRadius * 1.6 : this.nestRadius;
+    const sweepAmp = isLvl2 ? 2.4 : 1.3;
+    const freqMult = isLvl2 ? 1.5 : 1.0;
+
     const tangentOffset =
-      Math.sin(t * this.freqX1 + this.phaseX) * (rad * 1.3) +
-      Math.cos(t * this.freqX2) * (rad * 0.4);
+      Math.sin(t * (this.freqX1 * freqMult) + this.phaseX) * (rad * sweepAmp) +
+      Math.cos(t * (this.freqX2 * freqMult)) * (rad * (isLvl2 ? 0.9 : 0.4));
     const verticalOffset =
-      Math.sin(t * this.freqY1 + this.phaseY) * (rad * 0.65) +
+      Math.sin(t * (this.freqY1 * freqMult) + this.phaseY) * (rad * (isLvl2 ? 0.85 : 0.65)) +
       Math.cos(t * this.freqY2) * 0.45;
-    const radialOffset = Math.cos(t * this.freqZ1 + this.phaseZ) * (rad * 0.35);
+    const radialOffset = Math.cos(t * (this.freqZ1 * freqMult) + this.phaseZ) * (rad * (isLvl2 ? 0.55 : 0.35));
 
     let targetPos = this.nestPosition
       .clone()
@@ -476,27 +480,33 @@ export class Mosquito {
       .addScaledVector(nestDir, radialOffset);
 
     // Add high-frequency insect hover vibration (revoloteo micro-oscillation)
-    const flutterY = Math.sin(t * cfg.movement.flutterFreq) * cfg.movement.flutterAmp;
-    const flutterX = Math.cos(t * (cfg.movement.flutterFreq * 0.85)) * (cfg.movement.flutterAmp * 0.8);
-    const flutterZ = Math.sin(t * (cfg.movement.flutterFreq * 1.15)) * (cfg.movement.flutterAmp * 0.8);
+    const flutterAmp = isLvl2 ? cfg.movement.flutterAmp * 1.3 : cfg.movement.flutterAmp;
+    const flutterY = Math.sin(t * cfg.movement.flutterFreq) * flutterAmp;
+    const flutterX = Math.cos(t * (cfg.movement.flutterFreq * 0.85)) * (flutterAmp * 0.8);
+    const flutterZ = Math.sin(t * (cfg.movement.flutterFreq * 1.15)) * (flutterAmp * 0.8);
     targetPos.x += flutterX;
     targetPos.y += flutterY;
     targetPos.z += flutterZ;
 
     // Frequent insect darts (quiebres rápidos de dirección)
     this.dartTimer += delta;
+    const dartMin = isLvl2 ? cfg.movement.dartMinIntervalLvl2 : cfg.movement.dartMinInterval;
+    const dartMax = isLvl2 ? cfg.movement.dartMaxIntervalLvl2 : cfg.movement.dartMaxInterval;
+    const dartDur = isLvl2 ? cfg.movement.dartDurationLvl2 : cfg.movement.dartDuration;
+    const dartMult = isLvl2 ? cfg.movement.dartSpeedMultiplierLvl2 : cfg.movement.dartSpeedMultiplier;
+
     if (!this.isDarting && this.dartTimer >= this.nextDartInterval) {
       this.isDarting = true;
       this.dartProgress = 0;
       this.dartTimer = 0;
-      this.dartDuration = cfg.movement.dartDuration;
+      this.dartDuration = dartDur;
       this.nextDartInterval =
-        cfg.movement.dartMinInterval +
-        Math.random() * (cfg.movement.dartMaxInterval - cfg.movement.dartMinInterval);
+        dartMin + Math.random() * (dartMax - dartMin);
+      const dartSpread = isLvl2 ? 1.1 : 0.65;
       this.dartOffset.set(
-        (Math.random() - 0.5) * 0.65,
-        (Math.random() - 0.5) * 0.35,
-        (Math.random() - 0.5) * 0.65
+        (Math.random() - 0.5) * dartSpread,
+        (Math.random() - 0.5) * (dartSpread * 0.55),
+        (Math.random() - 0.5) * dartSpread
       );
     }
 
@@ -504,7 +514,7 @@ export class Mosquito {
     if (this.isDarting) {
       this.dartProgress += delta;
       targetPos.add(this.dartOffset);
-      speedMultiplier = cfg.movement.dartSpeedMultiplier;
+      speedMultiplier = dartMult;
       if (this.dartProgress >= this.dartDuration) {
         this.isDarting = false;
       }
@@ -514,17 +524,19 @@ export class Mosquito {
     const distToTarget = desiredDir.length();
     if (distToTarget > 0.001) desiredDir.normalize();
 
-    let nominalSpeed = this.baseSpeed * speedMultiplier * Math.min(2.2, Math.max(0.7, distToTarget * 1.4));
+    let nominalSpeed = this.baseSpeed * speedMultiplier * Math.min(2.5, Math.max(0.7, distToTarget * 1.5));
 
     if (isInView) {
-      nominalSpeed *= cfg.movement.inViewSpeedDamp;
-      const maxLinearSpeed = distToCamera * (cfg.movement.maxAngularSpeedDeg * (Math.PI / 180));
+      nominalSpeed *= isLvl2 ? cfg.movement.inViewSpeedDampLvl2 : cfg.movement.inViewSpeedDamp;
+      const maxAngular = isLvl2 ? cfg.movement.maxAngularSpeedDegLvl2 : cfg.movement.maxAngularSpeedDeg;
+      const maxLinearSpeed = distToCamera * (maxAngular * (Math.PI / 180));
       nominalSpeed = Math.min(nominalSpeed, maxLinearSpeed);
     }
 
     this.currentSpeed = nominalSpeed;
     const targetVel = desiredDir.multiplyScalar(this.currentSpeed);
-    this.flightVelocity.lerp(targetVel, delta * cfg.movement.turnSmoothing);
+    const smooth = isLvl2 ? cfg.movement.turnSmoothingLvl2 : cfg.movement.turnSmoothing;
+    this.flightVelocity.lerp(targetVel, delta * smooth);
 
     // Camera repel force: keep mosquito from sticking right against screen
     if (distToCamera < cfg.movement.cameraRepelDistance) {

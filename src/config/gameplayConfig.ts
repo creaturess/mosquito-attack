@@ -43,17 +43,20 @@ export const GAMEPLAY_CONFIG = {
     /** Velocidad base de vuelo en m/s en Nivel 1 */
     baseSpeedLvl1: 0.42,
 
-    /** Velocidad base de vuelo en m/s en Nivel 2 */
-    baseSpeedLvl2: 0.55,
+    /** Velocidad base de vuelo en m/s en Nivel 2 (mucho más rápido y cruzando de lado a lado) */
+    baseSpeedLvl2: 1.15,
 
     /** Límite de velocidad angular cuando está a la vista del jugador (grados por segundo en pantalla) */
-    maxAngularSpeedDeg: 85,
+    maxAngularSpeedDeg: 90,
+    maxAngularSpeedDegLvl2: 140,
 
     /** Suavizado de giro */
     turnSmoothing: 4.5,
+    turnSmoothingLvl2: 6.2,
 
     /** Reducción de velocidad cuando el mosquito está dentro del campo de visión */
     inViewSpeedDamp: 0.88,
+    inViewSpeedDampLvl2: 0.95,
 
     /** Frecuencia de micro-revoloteo/vibración de vuelo (Hz) */
     flutterFreq: 15.0,
@@ -63,15 +66,22 @@ export const GAMEPLAY_CONFIG = {
 
     /** Intervalo mínimo entre quiebres erráticos de dirección (segundos) */
     dartMinInterval: 0.5,
+    dartMinIntervalLvl2: 0.25,
 
     /** Intervalo máximo entre quiebres erráticos de dirección (segundos) */
-    dartMaxInterval: 1.3,
+    dartMaxInterval: 1.2,
+    dartMaxIntervalLvl2: 0.65,
 
     /** Multiplicador de velocidad durante un pique o quiebre errático */
     dartSpeedMultiplier: 1.65,
+    dartSpeedMultiplierLvl2: 2.1,
 
     /** Duración del pique errático (segundos) */
     dartDuration: 0.22,
+    dartDurationLvl2: 0.32,
+
+    /** Amplitud de cruce transversal de pantalla en Nivel 2 (metros de barrido de izquierda a derecha) */
+    crossSweepRadiusLvl2: 4.6,
 
     /** Distancia mínima de seguridad a la cámara para que nunca se pegue a la pantalla */
     cameraRepelDistance: 2.8,

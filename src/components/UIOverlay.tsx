@@ -13,6 +13,11 @@ import { Crosshair, Clock } from 'lucide-react';
 import { GameState } from './ThreeCanvas';
 import { sensorManager } from '../sensors/SensorManager';
 
+interface NearestMosquitoData {
+  direction: 'left' | 'right' | 'behind' | 'center';
+  distance: number;
+}
+
 interface UIOverlayProps {
   gameState: GameState;
   sensorStatus?: unknown;
@@ -20,7 +25,7 @@ interface UIOverlayProps {
   isScreaming?: boolean;
   onCalibrateGyro?: () => void;
   forwardDistance?: number;
-  nearestMosquito?: unknown;
+  nearestMosquito?: NearestMosquitoData | null;
   proximityHeat?: number;
   isAimingNear?: boolean;
   edgeIndicator?: unknown;
@@ -29,7 +34,11 @@ interface UIOverlayProps {
   debugNests?: unknown;
 }
 
-export const UIOverlay: React.FC<UIOverlayProps> = ({ gameState }) => {
+export const UIOverlay: React.FC<UIOverlayProps> = ({
+  gameState,
+  nearestMosquito,
+  isAimingNear,
+}) => {
   const [swatEffect, setSwatEffect] = useState<{ x: number; y: number } | null>(null);
 
   // Screen click/tap slap visual feedback
@@ -104,12 +113,47 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ gameState }) => {
         </div>
       </div>
 
-      {/* --- CENTRAL RETICLE: SIMPLE, CLEAN & DISCREET --- */}
+      {/* --- CENTRAL RETICLE WITH LOCK-ON TARGETING FEEDBACK --- */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="h-6 w-6 rounded-full border border-white/45 bg-black/10 flex items-center justify-center shadow-sm">
-          <Crosshair className="h-3.5 w-3.5 text-white/60" />
+        <div
+          className={`rounded-full border transition-all duration-150 flex items-center justify-center shadow-sm ${
+            isAimingNear
+              ? 'h-8 w-8 border-cyan-400 bg-cyan-500/20 scale-110 shadow-cyan-500/50'
+              : 'h-6 w-6 border-white/45 bg-black/10'
+          }`}
+        >
+          <Crosshair
+            className={`h-3.5 w-3.5 transition-colors ${
+              isAimingNear ? 'text-cyan-300' : 'text-white/60'
+            }`}
+          />
         </div>
       </div>
+
+      {/* --- DIRECTIONAL TRACKING INDICATOR (LEFT / RIGHT / BEHIND) --- */}
+      {nearestMosquito && nearestMosquito.direction !== 'center' && (
+        <>
+          {nearestMosquito.direction === 'left' && (
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full bg-cyan-950/80 border border-cyan-400/50 px-2.5 py-1 text-cyan-300 font-mono text-[11px] font-bold shadow-lg shadow-cyan-950/50 animate-pulse">
+              <span className="text-sm">◀</span>
+              <span>{nearestMosquito.distance.toFixed(1)}m</span>
+            </div>
+          )}
+
+          {nearestMosquito.direction === 'right' && (
+            <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full bg-cyan-950/80 border border-cyan-400/50 px-2.5 py-1 text-cyan-300 font-mono text-[11px] font-bold shadow-lg shadow-cyan-950/50 animate-pulse">
+              <span>{nearestMosquito.distance.toFixed(1)}m</span>
+              <span className="text-sm">▶</span>
+            </div>
+          )}
+
+          {nearestMosquito.direction === 'behind' && (
+            <div className="pointer-events-none absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-rose-950/80 border border-rose-400/50 px-3 py-1 text-rose-300 font-mono text-[11px] font-bold shadow-lg animate-pulse">
+              <span>▼ DETRÁS ({nearestMosquito.distance.toFixed(1)}m)</span>
+            </div>
+          )}
+        </>
+      )}
 
       {/* --- TAP FEEDBACK RETICLE --- */}
       {swatEffect && (

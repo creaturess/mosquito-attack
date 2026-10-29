@@ -45,7 +45,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
             {level === 1 &&
               'Aclimatación: Mosquitos dispersos en tu entorno real volando calmadamente. Apunta con la cámara y guíate por su zumbido 3D para encontrarlos.'}
             {level === 2 &&
-              'Los mosquitos son un poco más pequeños y se mueven más rápido en tu espacio físico. Sigue su zumbido agudo y elimínalos con rapidez.'}
+              '¡Invasión veloz! 15 mosquitos cruzan rápidamente de un lado a otro frente a ti. Sigue su trayectoria con la cámara y elimínalos antes de que acabe el tiempo.'}
             {level === 3 &&
               '¡El Mosquito Gigante ha aparecido frente a ti en tu cámara! Se moverá solo hacia adelante y hacia atrás mirándote de frente en silencio. ¡GRITA lo más fuerte posible durante 10 segundos para destruirlo!'}
           </p>
@@ -66,7 +66,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
               <div>
                 <div className="text-[10px] text-slate-400 uppercase">Objetivo</div>
                 <div className="font-mono text-sm font-bold text-rose-300">
-                  {level === 3 ? 'Gritar 10s' : '20 mosquitos'}
+                  {level === 3 ? 'Gritar 10s' : level === 2 ? '15 mosquitos' : '20 mosquitos'}
                 </div>
               </div>
             </div>
