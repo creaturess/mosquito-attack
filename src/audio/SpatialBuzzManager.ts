@@ -363,54 +363,6 @@ export class SpatialBuzzManager {
   }
 
   /**
-   * Play sharp blade slice / swoosh cut sound effect
-   */
-  public playSliceSfx() {
-    if (!this.ctx || this.isMuted) return;
-    const t = this.ctx.currentTime;
-
-    // High blade swoosh (bandpass filtered noise with frequency sweep)
-    const bufferSize = Math.floor(this.ctx.sampleRate * 0.15);
-    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const output = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      output[i] = Math.random() * 2 - 1;
-    }
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = noiseBuffer;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.Q.value = 4.0;
-    filter.frequency.setValueAtTime(3200, t);
-    filter.frequency.exponentialRampToValueAtTime(700, t + 0.12);
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.75, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-
-    noise.connect(filter);
-    filter.connect(gain);
-    if (this.masterGain) gain.connect(this.masterGain);
-    noise.start(t);
-
-    // Sharp metallic bite
-    const biteOsc = this.ctx.createOscillator();
-    const biteGain = this.ctx.createGain();
-    biteOsc.type = 'triangle';
-    biteOsc.frequency.setValueAtTime(880, t);
-    biteOsc.frequency.exponentialRampToValueAtTime(240, t + 0.08);
-
-    biteGain.gain.setValueAtTime(0.5, t);
-    biteGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-
-    biteOsc.connect(biteGain);
-    if (this.masterGain) biteGain.connect(this.masterGain);
-    biteOsc.start(t);
-    biteOsc.stop(t + 0.09);
-  }
-
-  /**
    * Play Boss damage / scream hit sound
    */
   public playBossHurtSfx() {

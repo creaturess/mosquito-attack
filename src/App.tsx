@@ -223,10 +223,7 @@ export default function App() {
   };
 
   return (
-    <div
-      className="relative h-full w-full select-none overflow-hidden bg-black font-sans touch-none"
-      style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', overscrollBehavior: 'none' }}
-    >
+    <div className="relative h-full w-full select-none overflow-hidden bg-black font-sans">
       {/* Background Real-World Camera Feed or Atmospheric Backdrop */}
       <div className="absolute inset-0 z-0 h-full w-full overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-black pointer-events-none">
         <video
