@@ -1,7 +1,7 @@
 /**
  * MosquitoModelLoader.ts
  * Manages asynchronous loading, centering, scaling, and caching
- * of the 3D mosquito GLTF asset from src/assets/scene.gltf.
+ * of the 3D mosquito GLTF asset from public/assets/scene.gltf and src/assets/scene.gltf.
  */
 
 import * as THREE from 'three';
@@ -15,7 +15,6 @@ class MosquitoModelLoader {
   private baseTemplate: THREE.Group | null = null;
   private bossTemplate: THREE.Group | null = null;
   private isLoading: boolean = false;
-  private loadError: Error | null = null;
   private listeners: ModelLoadCallback[] = [];
 
   constructor() {
@@ -41,11 +40,12 @@ class MosquitoModelLoader {
     if (this.isLoading || this.baseTemplate) return;
     this.isLoading = true;
 
-    // Try primary asset URL from Vite, with fallback to standard dev/prod paths
+    // Prioritize public and Vite-resolved gltf assets
     const candidateUrls = [
       sceneGltfUrl,
-      '/src/assets/scene.gltf',
       '/assets/scene.gltf',
+      '/public/assets/scene.gltf',
+      '/src/assets/scene.gltf',
       'src/assets/scene.gltf',
     ];
 
@@ -87,29 +87,25 @@ class MosquitoModelLoader {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
-    // Center geometry so rotation pivot is inside thorax/center of gravity
+    // Center geometry so rotation pivot is inside thorax / center of mass
     model.position.sub(center);
 
-    // Target length is ~1.0m to seamlessly match game world scale
+    // Target length is ~1.15m to match game world scale
     const maxDim = Math.max(size.x, size.y, size.z);
-    const targetScale = maxDim > 0 ? 1.0 / maxDim : 1.0;
+    const targetScale = maxDim > 0 ? 1.15 / maxDim : 1.0;
     model.scale.setScalar(targetScale);
 
-    // Ensure forward flight direction aligns with -Z (Three.js convention)
-    // The model's longest axis is Z
-    root.add(model);
-
-    // Apply distinct procedural PBR materials to parts for maximum clarity in AR
+    // Sleek, high-contrast dark chitin exoskeleton
     const standardBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x181a1d,
-      roughness: 0.38,
+      color: 0x16181b,
+      roughness: 0.35,
       metalness: 0.25,
       side: THREE.DoubleSide,
     });
 
     const standardWingMat = new THREE.MeshStandardMaterial({
       name: 'wingMat',
-      color: 0xbae6fd,
+      color: 0xcbe9fc,
       roughness: 0.2,
       metalness: 0.1,
       transparent: true,
@@ -120,39 +116,64 @@ class MosquitoModelLoader {
     const standardEyeMat = new THREE.MeshStandardMaterial({
       color: 0xff3300,
       emissive: 0xff2200,
-      emissiveIntensity: 0.85,
+      emissiveIntensity: 0.9,
       roughness: 0.2,
       metalness: 0.1,
     });
 
+    // Apply unified chitin material across all mesh body chunks
     model.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
-
-        if (mesh.name === 'Mosquito_Mesh_Part_3') {
-          mesh.material = standardEyeMat;
-        } else if (mesh.name === 'Mosquito_Mesh_Part_4') {
-          mesh.material = standardWingMat;
-        } else {
-          mesh.material = standardBodyMat;
-        }
+        mesh.material = standardBodyMat;
       }
     });
 
+    root.add(model);
+
+    // Add delicate fluttering wings attached to thorax
+    const wingGeo = new THREE.PlaneGeometry(0.32, 0.9);
+    wingGeo.translate(0, 0.45, 0);
+    wingGeo.rotateX(Math.PI / 2);
+
+    const leftWing = new THREE.Mesh(wingGeo, standardWingMat);
+    leftWing.name = 'Mosquito_LeftWing';
+    leftWing.position.set(-0.12, 0.16, 0.02);
+    leftWing.rotation.y = 0.45;
+
+    const rightWing = new THREE.Mesh(wingGeo, standardWingMat);
+    rightWing.name = 'Mosquito_RightWing';
+    rightWing.position.set(0.12, 0.16, 0.02);
+    rightWing.rotation.y = -0.45;
+
+    root.add(leftWing, rightWing);
+
+    // Glowing compound eyes on the head
+    const eyeGeo = new THREE.SphereGeometry(0.075, 8, 8);
+    const leftEye = new THREE.Mesh(eyeGeo, standardEyeMat);
+    leftEye.name = 'Mosquito_LeftEye';
+    leftEye.position.set(-0.08, 0.08, -0.38);
+
+    const rightEye = new THREE.Mesh(eyeGeo, standardEyeMat);
+    rightEye.name = 'Mosquito_RightEye';
+    rightEye.position.set(0.08, 0.08, -0.38);
+
+    root.add(leftEye, rightEye);
+
     this.baseTemplate = root;
 
-    // Create specialized Boss template (dark crimson carapace, ominous glowing eyes)
+    // --- Specialized Boss Template (Level 3 King Mosquito) ---
     this.bossTemplate = root.clone(true);
     this.bossTemplate.name = 'Mosquito_GLTF_Boss';
 
     const bossBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x2e0615,
-      roughness: 0.32,
+      color: 0x2e0614,
+      roughness: 0.3,
       metalness: 0.4,
-      emissive: 0x3d0514,
-      emissiveIntensity: 0.35,
+      emissive: 0x480618,
+      emissiveIntensity: 0.45,
       side: THREE.DoubleSide,
     });
 
@@ -169,7 +190,7 @@ class MosquitoModelLoader {
     const bossEyeMat = new THREE.MeshStandardMaterial({
       color: 0xff0044,
       emissive: 0xff0033,
-      emissiveIntensity: 1.2,
+      emissiveIntensity: 1.3,
       roughness: 0.15,
       metalness: 0.1,
     });
@@ -177,9 +198,9 @@ class MosquitoModelLoader {
     this.bossTemplate.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
-        if (mesh.name === 'Mosquito_Mesh_Part_3') {
+        if (mesh.name === 'Mosquito_LeftEye' || mesh.name === 'Mosquito_RightEye') {
           mesh.material = bossEyeMat;
-        } else if (mesh.name === 'Mosquito_Mesh_Part_4') {
+        } else if (mesh.name === 'Mosquito_LeftWing' || mesh.name === 'Mosquito_RightWing') {
           mesh.material = bossWingMat;
         } else {
           mesh.material = bossBodyMat;

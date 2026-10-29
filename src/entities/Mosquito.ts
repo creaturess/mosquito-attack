@@ -44,6 +44,8 @@ export class Mosquito {
 
   // 3D GLTF Model from src/assets/scene.gltf
   public gltfModel: THREE.Group | null = null;
+  private gltfLeftWing: THREE.Mesh | null = null;
+  private gltfRightWing: THREE.Mesh | null = null;
   private proceduralModel: THREE.Group | null = null;
   private unsubscribeModelReady: (() => void) | null = null;
 
@@ -194,6 +196,8 @@ export class Mosquito {
     }
 
     this.gltfModel = instance;
+    this.gltfLeftWing = this.gltfModel.getObjectByName('Mosquito_LeftWing') as THREE.Mesh | null;
+    this.gltfRightWing = this.gltfModel.getObjectByName('Mosquito_RightWing') as THREE.Mesh | null;
     this.group.add(this.gltfModel);
 
     // Extract materials from GLTF for opacity tracking
@@ -366,6 +370,10 @@ export class Mosquito {
         this.leftWing.rotation.z = flap;
         this.rightWing.rotation.z = -flap;
       }
+      if (this.gltfLeftWing && this.gltfRightWing) {
+        this.gltfLeftWing.rotation.z = flap;
+        this.gltfRightWing.rotation.z = -flap;
+      }
       if (this.gltfModel) {
         this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.12;
         this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.03;
@@ -519,6 +527,10 @@ export class Mosquito {
     if (this.leftWing && this.rightWing) {
       this.leftWing.rotation.z = flap;
       this.rightWing.rotation.z = -flap;
+    }
+    if (this.gltfLeftWing && this.gltfRightWing) {
+      this.gltfLeftWing.rotation.z = flap;
+      this.gltfRightWing.rotation.z = -flap;
     }
     if (this.gltfModel) {
       this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.1;

@@ -67,13 +67,13 @@
       "doubleSided": true,
       "pbrMetallicRoughness": {
         "baseColorFactor": [
+          0.12,
           0.14,
           0.16,
-          0.18,
           1
         ],
         "metallicFactor": 0.25,
-        "roughnessFactor": 0.45
+        "roughnessFactor": 0.4
       }
     }
   ],
