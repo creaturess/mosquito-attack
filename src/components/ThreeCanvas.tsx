@@ -281,7 +281,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         });
       } else {
         // Levels 1 & 2: Wide 360-degree spread, strictly 1 mosquito per sector so they NEVER spawn together
-        const totalMosquitoes = currentLvl === 1 ? 6 : 10;
+        const totalMosquitoes = currentLvl === 1 ? 10 : 12;
         for (let i = 0; i < totalMosquitoes; i++) {
           const baseAngle = (i / totalMosquitoes) * Math.PI * 2;
           const angle = baseAngle + (Math.random() - 0.5) * 0.25;
@@ -590,7 +590,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
               camForward
             );
 
-            const respawnDelayMs = mos.level === 2 ? 1400 : GAMEPLAY_CONFIG.nests.respawnDelaySec * 1000;
+            const respawnDelayMs = mos.level === 2 ? 1200 : 1800;
             if (!mos.isBoss && now - mos.deathTime > respawnDelayMs) {
               mos.respawnAtNest();
             }
