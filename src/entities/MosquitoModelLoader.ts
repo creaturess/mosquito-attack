@@ -107,15 +107,15 @@ class MosquitoModelLoader {
         mesh.receiveShadow = true;
 
         if (mesh.material) {
-          const mat = mesh.material as THREE.MeshStandardMaterial;
-          mat.side = THREE.DoubleSide;
-          mat.roughness = 0.38;
-          mat.metalness = 0.22;
-          if (mat.map) {
-            mat.map.colorSpace = THREE.SRGBColorSpace;
-          } else {
-            mat.color.setHex(0x181a1e);
-          }
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          mats.forEach((m) => {
+            const stdMat = m as THREE.MeshStandardMaterial;
+            stdMat.side = THREE.DoubleSide;
+            if (stdMat.map) {
+              stdMat.map.colorSpace = THREE.SRGBColorSpace;
+            }
+            // Preserve the original textures, vertex colors and chitin patterns from the user's GLB model!
+          });
         }
       }
     });
@@ -145,7 +145,7 @@ class MosquitoModelLoader {
     this.baseTemplate = root;
 
     // --- Specialized Boss Template (Level 3 King Mosquito) ---
-    // Natural dark obsidian chitin - NOT painted in red, with smaller subtle ruby eyes
+    // Preserves the full authentic colors, textures and striped patterns of the attached model!
     this.bossTemplate = root.clone(true);
     this.bossTemplate.name = 'Mosquito_GLTF_Boss';
 
@@ -153,25 +153,28 @@ class MosquitoModelLoader {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         if (mesh.name === 'Mosquito_LeftEye' || mesh.name === 'Mosquito_RightEye') {
-          // Smaller refined red eyes (not giant glowing orbs)
-          mesh.scale.setScalar(0.75);
+          // Smaller refined red eyes
+          mesh.scale.setScalar(0.7);
           mesh.material = new THREE.MeshStandardMaterial({
             color: 0x991b1b,
             emissive: 0x450a0a,
-            emissiveIntensity: 0.55,
+            emissiveIntensity: 0.5,
             roughness: 0.25,
             metalness: 0.1,
           });
         } else if (mesh.material) {
-          // Natural dark charcoal/obsidian chitin (NO red paint)
-          const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
-          mat.side = THREE.DoubleSide;
-          mat.roughness = 0.38;
-          mat.metalness = 0.28;
-          mat.color.setHex(0x181a1e); // Realistic dark chitin
-          mat.emissive.setHex(0x000000); // Zero red emissive
-          mat.emissiveIntensity = 0.0;
-          mesh.material = mat;
+          // Clone material so boss is independent, retaining all original colors, maps and textures of the attached 3D model
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map((mat) => {
+              const m = mat.clone();
+              m.side = THREE.DoubleSide;
+              return m;
+            });
+          } else {
+            const m = mesh.material.clone();
+            m.side = THREE.DoubleSide;
+            mesh.material = m;
+          }
         }
       }
     });

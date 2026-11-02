@@ -352,16 +352,16 @@ export class Mosquito {
         : new THREE.Vector3(0, 0, -1);
       const horizontalRight = new THREE.Vector3(-horizontalForward.z, 0, horizontalForward.x);
 
-      // Distance kept at ~5.0m so the entire boss is framed clearly within viewport
-      const comfortableDistance = 5.0 + Math.sin(t * 0.8) * 0.35;
+      // Distance kept stable at ~5.0m with minimal variation
+      const comfortableDistance = 5.0 + Math.sin(t * 0.4) * 0.12;
 
-      // Upward climb: strictly ascending from bottom (-1.9m below eye line) to top (+2.4m above)
-      const climbPeriod = 4.8;
-      const climbPhase = ((t * 0.88 + this.timeOffset) % climbPeriod) / climbPeriod;
-      const verticalClimb = -1.9 + climbPhase * 4.3;
+      // Upward climb: reduced to a gentle, steady ascent (moving less, staying well centered)
+      const climbPeriod = 6.4;
+      const climbPhase = ((t * 0.55 + this.timeOffset) % climbPeriod) / climbPeriod;
+      const verticalClimb = -0.75 + climbPhase * 1.8;
 
-      // Natural lateral micro-sway
-      const lateralSway = Math.sin(t * 1.7) * 0.45;
+      // Subtly reduced lateral micro-sway (moves much less)
+      const lateralSway = Math.sin(t * 1.0) * 0.16;
 
       const bossTargetPos = playerPos
         .clone()
@@ -369,22 +369,22 @@ export class Mosquito {
         .addScaledVector(horizontalRight, lateralSway);
       bossTargetPos.y = playerPos.y + verticalClimb;
 
-      // When the player screams, the boss recoils downward and shudders violently
+      // When the player screams, the boss recoils downward and shudders
       if (reactiveAudioLevel > 0.05) {
-        const shakeAmt = reactiveAudioLevel * 0.35;
-        bossTargetPos.y -= reactiveAudioLevel * 0.55; // Pushed down by scream shockwave
+        const shakeAmt = reactiveAudioLevel * 0.25;
+        bossTargetPos.y -= reactiveAudioLevel * 0.45; // Pushed down by scream shockwave
         bossTargetPos.x += (Math.random() - 0.5) * shakeAmt;
         bossTargetPos.z += (Math.random() - 0.5) * shakeAmt;
       }
 
-      this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.5));
+      this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 4.2));
 
-      // Strictly upright posture with climbing pitch: faces player in yaw, tilted upward into climb
+      // Straight, upright, majestic posture (no aggressive backward/forward slant)
       const toPlayer = playerPos.clone().sub(this.group.position);
       const targetYaw = Math.atan2(toPlayer.x, toPlayer.z) + Math.PI;
       this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, targetYaw, delta * 8.0);
-      // Slight upward body pitch (-0.26 rad) so head/proboscis point up as it ascends
-      this.group.rotation.set(-0.26, this.currentYaw, 0, 'YXZ');
+      // Pose is straight (-0.02 rad pitch) with legs down and back upright
+      this.group.rotation.set(-0.02, this.currentYaw, 0, 'YXZ');
 
       // Wing flapping & flight vibration
       const flapRate = this.flapSpeed * (reactiveAudioLevel > 0.05 ? 1.6 : 1.0);
@@ -399,8 +399,8 @@ export class Mosquito {
         this.gltfRightWing.rotation.z = -flap;
       }
       if (this.gltfModel) {
-        this.gltfModel.rotation.z = Math.sin(t * flapRate * 1.2) * 0.08;
-        this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.02;
+        this.gltfModel.rotation.z = Math.sin(t * flapRate * 0.8) * 0.02;
+        this.gltfModel.position.y = Math.sin(t * flapRate * 1.0) * 0.006;
       }
 
       // Smooth fade-in from bottom and fade-out at top of climb loop
