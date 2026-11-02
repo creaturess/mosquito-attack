@@ -14,12 +14,434 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Mosquito } from '../entities/Mosquito';
+import { mosquitoModelLoader } from '../entities/MosquitoModelLoader';
 import { ParticleSystem } from '../entities/ParticleSystem';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
-import { MosquitoSliceManager } from '../effects/MosquitoSliceManager';
-import { BladeSwipeDetector, MosquitoScreenTarget, SliceHitResult } from '../effects/BladeSwipeDetector';
+
+// ==========================================
+// FRUIT NINJA SWIPE & SLICING INTERNAL TYPES & MANAGERS
+// Self-contained to guarantee Vercel builds without external path errors
+// ==========================================
+
+export interface SwipePoint {
+  x: number;
+  y: number;
+  time: number;
+}
+
+export interface MosquitoScreenTarget {
+  id: string;
+  screenX: number;
+  screenY: number;
+  radiusPx: number;
+  isDead: boolean;
+  userData: unknown;
+}
+
+export interface SliceHitResult {
+  targetId: string;
+  p1: { x: number; y: number };
+  p2: { x: number; y: number };
+  swipeSpeed: number;
+}
+
+export class BladeSwipeDetector {
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D | null;
+  private points: SwipePoint[] = [];
+
+  public trailLifetimeMs: number = 160;
+  public minSwipeSpeed: number = 220;
+  public minSegmentLength: number = 8;
+  public coreColor: string = '#ffffff';
+  public glowColor: string = '#38bdf8';
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+  }
+
+  public resize(width: number, height: number) {
+    this.canvas.width = width;
+    this.canvas.height = height;
+  }
+
+  public addPoint(x: number, y: number) {
+    const now = performance.now();
+    this.points.push({ x, y, time: now });
+  }
+
+  public endStroke() {}
+
+  public checkIntersections(targets: MosquitoScreenTarget[]): SliceHitResult[] {
+    const hits: SliceHitResult[] = [];
+    if (this.points.length < 2) return hits;
+
+    const p2 = this.points[this.points.length - 1];
+    const p1 = this.points[this.points.length - 2];
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    if (len < this.minSegmentLength) return hits;
+
+    const dt = Math.max((p2.time - p1.time) / 1000, 0.001);
+    const speed = len / dt;
+
+    if (speed < this.minSwipeSpeed) return hits;
+
+    const lenSq = len * len;
+
+    for (const target of targets) {
+      if (target.isDead) continue;
+
+      const cx = target.screenX;
+      const cy = target.screenY;
+      const radius = target.radiusPx;
+
+      const dot = (cx - p1.x) * dx + (cy - p1.y) * dy;
+      const t = Math.max(0, Math.min(1, dot / lenSq));
+
+      const qx = p1.x + t * dx;
+      const qy = p1.y + t * dy;
+
+      const distSq = (cx - qx) * (cx - qx) + (cy - qy) * (cy - qy);
+
+      if (distSq <= radius * radius) {
+        hits.push({
+          targetId: target.id,
+          p1: { x: p1.x, y: p1.y },
+          p2: { x: p2.x, y: p2.y },
+          swipeSpeed: speed,
+        });
+      }
+    }
+
+    return hits;
+  }
+
+  public render() {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const now = performance.now();
+
+    this.points = this.points.filter((pt) => now - pt.time <= this.trailLifetimeMs);
+
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.points.length < 2) return;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (let i = 0; i < this.points.length - 1; i++) {
+      const ptA = this.points[i];
+      const ptB = this.points[i + 1];
+
+      const ageA = (now - ptA.time) / this.trailLifetimeMs;
+      const progress = i / (this.points.length - 1);
+      const alpha = Math.max(0, (1 - ageA) * progress);
+
+      ctx.beginPath();
+      ctx.moveTo(ptA.x, ptA.y);
+      ctx.lineTo(ptB.x, ptB.y);
+
+      ctx.strokeStyle = this.glowColor;
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.lineWidth = 10 * progress + 2;
+      ctx.shadowColor = this.glowColor;
+      ctx.shadowBlur = 12;
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < this.points.length - 1; i++) {
+      const ptA = this.points[i];
+      const ptB = this.points[i + 1];
+
+      const ageA = (now - ptA.time) / this.trailLifetimeMs;
+      const progress = i / (this.points.length - 1);
+      const alpha = Math.max(0, (1 - ageA) * progress);
+
+      ctx.beginPath();
+      ctx.moveTo(ptA.x, ptA.y);
+      ctx.lineTo(ptB.x, ptB.y);
+
+      ctx.strokeStyle = this.coreColor;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 4 * progress + 1;
+      ctx.shadowBlur = 0;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  public clear() {
+    this.points = [];
+    if (this.ctx) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+  }
+}
+
+interface SlicedHalf {
+  group: THREE.Group;
+  velocity: THREE.Vector3;
+  angularVelocity: THREE.Vector3;
+  age: number;
+  maxLifetime: number;
+  plane: THREE.Plane;
+  materials: THREE.Material[];
+}
+
+export interface SliceParams {
+  p1: { x: number; y: number };
+  p2: { x: number; y: number };
+  swipeSpeed: number;
+}
+
+export class MosquitoSliceManager {
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private activeHalves: SlicedHalf[] = [];
+  private particleGroup: THREE.Group;
+
+  public separationForce: number = 2.4;
+  public upwardPopForce: number = 1.3;
+  public gravity: number = -7.8;
+  public tumbleSpeed: number = 9.5;
+  public halfLifetime: number = 1.2;
+
+  constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+    this.scene = scene;
+    this.camera = camera;
+
+    this.particleGroup = new THREE.Group();
+    this.scene.add(this.particleGroup);
+  }
+
+  public spawnSlicedHalves(
+    mosquitoPos: THREE.Vector3,
+    mosquitoQuat: THREE.Quaternion,
+    mosquitoScale: THREE.Vector3,
+    isBoss: boolean,
+    sliceParams: SliceParams
+  ) {
+    const { p1, p2 } = sliceParams;
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const dirX = dx / len;
+    const dirY = dy / len;
+
+    const normX = -dirY;
+    const normY = dirX;
+
+    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+    const worldCutNormal = new THREE.Vector3()
+      .addScaledVector(cameraRight, normX)
+      .addScaledVector(cameraUp, -normY)
+      .normalize();
+
+    const worldSwipeDir = new THREE.Vector3()
+      .addScaledVector(cameraRight, dirX)
+      .addScaledVector(cameraUp, -dirY)
+      .normalize();
+
+    const planeA = new THREE.Plane();
+    planeA.setFromNormalAndCoplanarPoint(worldCutNormal, mosquitoPos);
+
+    const planeB = new THREE.Plane();
+    planeB.setFromNormalAndCoplanarPoint(worldCutNormal.clone().negate(), mosquitoPos);
+
+    const createHalfMesh = (plane: THREE.Plane, sign: number): SlicedHalf | null => {
+      const model = mosquitoModelLoader.createInstance(isBoss);
+      if (!model) return null;
+
+      const halfGroup = new THREE.Group();
+      halfGroup.position.copy(mosquitoPos);
+      halfGroup.quaternion.copy(mosquitoQuat);
+      halfGroup.scale.copy(mosquitoScale);
+
+      halfGroup.position.addScaledVector(worldCutNormal, sign * 0.04);
+
+      const halfMaterials: THREE.Material[] = [];
+
+      model.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map((mat) => {
+              const m = mat.clone();
+              m.clippingPlanes = [plane];
+              m.clipShadows = true;
+              m.side = THREE.DoubleSide;
+              m.transparent = true;
+              halfMaterials.push(m);
+              return m;
+            });
+          } else if (mesh.material) {
+            const m = mesh.material.clone();
+            m.clippingPlanes = [plane];
+            m.clipShadows = true;
+            m.side = THREE.DoubleSide;
+            m.transparent = true;
+            mesh.material = m;
+            halfMaterials.push(m);
+          }
+        }
+      });
+
+      halfGroup.add(model);
+      this.scene.add(halfGroup);
+
+      const sepVel = worldCutNormal.clone().multiplyScalar(sign * this.separationForce);
+      const upVel = cameraUp.clone().multiplyScalar(this.upwardPopForce * (0.8 + Math.random() * 0.4));
+      const followVel = worldSwipeDir.clone().multiplyScalar(0.4);
+
+      const initialVelocity = sepVel.add(upVel).add(followVel);
+
+      const angularVelocity = new THREE.Vector3(
+        (Math.random() - 0.5) * this.tumbleSpeed * 1.5,
+        (Math.random() - 0.5) * this.tumbleSpeed * 1.2 + sign * 3.5,
+        (Math.random() - 0.5) * this.tumbleSpeed * 1.5
+      );
+
+      return {
+        group: halfGroup,
+        velocity: initialVelocity,
+        angularVelocity,
+        age: 0,
+        maxLifetime: this.halfLifetime,
+        plane,
+        materials: halfMaterials,
+      };
+    };
+
+    const halfA = createHalfMesh(planeA, 1.0);
+    const halfB = createHalfMesh(planeB, -1.0);
+
+    if (halfA) this.activeHalves.push(halfA);
+    if (halfB) this.activeHalves.push(halfB);
+
+    this.emitSliceBurst(mosquitoPos, worldCutNormal, worldSwipeDir);
+  }
+
+  private emitSliceBurst(pos: THREE.Vector3, cutNormal: THREE.Vector3, swipeDir: THREE.Vector3) {
+    const count = 14;
+    const geom = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities: THREE.Vector3[] = [];
+
+    for (let i = 0; i < count; i++) {
+      positions[i * 3 + 0] = pos.x;
+      positions[i * 3 + 1] = pos.y;
+      positions[i * 3 + 2] = pos.z;
+
+      const spread = (Math.random() - 0.5) * 1.8;
+      const v = cutNormal
+        .clone()
+        .multiplyScalar(spread)
+        .addScaledVector(swipeDir, 0.4 + Math.random() * 0.8)
+        .add(new THREE.Vector3(0, 0.6 + Math.random() * 0.8, 0));
+      velocities.push(v);
+    }
+
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0x84cc16,
+      size: 0.09,
+      transparent: true,
+      opacity: 0.9,
+    });
+
+    const pSystem = new THREE.Points(geom, mat);
+    this.particleGroup.add(pSystem);
+
+    let age = 0;
+    const duration = 0.55;
+
+    const animateParticles = () => {
+      age += 0.016;
+      if (age > duration) {
+        this.particleGroup.remove(pSystem);
+        geom.dispose();
+        mat.dispose();
+        return;
+      }
+
+      const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
+      const arr = posAttr.array as Float32Array;
+
+      for (let i = 0; i < count; i++) {
+        const vel = velocities[i];
+        vel.y -= 9.8 * 0.016;
+        arr[i * 3 + 0] += vel.x * 0.016;
+        arr[i * 3 + 1] += vel.y * 0.016;
+        arr[i * 3 + 2] += vel.z * 0.016;
+      }
+      posAttr.needsUpdate = true;
+      mat.opacity = 0.9 * (1.0 - age / duration);
+
+      requestAnimationFrame(animateParticles);
+    };
+
+    requestAnimationFrame(animateParticles);
+  }
+
+  public update(delta: number) {
+    for (let i = this.activeHalves.length - 1; i >= 0; i--) {
+      const half = this.activeHalves[i];
+      half.age += delta;
+
+      if (half.age >= half.maxLifetime) {
+        this.scene.remove(half.group);
+        half.materials.forEach((m) => m.dispose());
+        this.activeHalves.splice(i, 1);
+        continue;
+      }
+
+      half.velocity.y += this.gravity * delta;
+      half.group.position.addScaledVector(half.velocity, delta);
+
+      half.group.rotation.x += half.angularVelocity.x * delta;
+      half.group.rotation.y += half.angularVelocity.y * delta;
+      half.group.rotation.z += half.angularVelocity.z * delta;
+
+      half.plane.setFromNormalAndCoplanarPoint(half.plane.normal, half.group.position);
+
+      const remainingProgress = (half.maxLifetime - half.age) / (half.maxLifetime * 0.35);
+      if (remainingProgress < 1.0) {
+        const alpha = Math.max(0, remainingProgress);
+        half.materials.forEach((m) => {
+          m.opacity = alpha;
+        });
+      }
+    }
+  }
+
+  public clearAll() {
+    this.activeHalves.forEach((half) => {
+      this.scene.remove(half.group);
+      half.materials.forEach((m) => m.dispose());
+    });
+    this.activeHalves = [];
+
+    while (this.particleGroup.children.length > 0) {
+      const child = this.particleGroup.children[0];
+      this.particleGroup.remove(child);
+    }
+  }
+}
+
 
 export interface GameState {
   currentLevel: 1 | 2 | 3;
