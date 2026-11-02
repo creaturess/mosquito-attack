@@ -164,15 +164,32 @@ class MosquitoModelLoader {
           });
         } else if (mesh.material) {
           // Clone material so boss is independent, retaining all original colors, maps and textures of the attached 3D model
+          const isWingMesh = mesh.name && mesh.name.toLowerCase().includes('wing');
           if (Array.isArray(mesh.material)) {
             mesh.material = mesh.material.map((mat) => {
               const m = mat.clone();
               m.side = THREE.DoubleSide;
+              if (isWingMesh) {
+                m.transparent = true;
+                m.opacity = 0.9;
+              } else {
+                m.transparent = false;
+                m.opacity = 1.0;
+                m.depthWrite = true;
+              }
               return m;
             });
           } else {
             const m = mesh.material.clone();
             m.side = THREE.DoubleSide;
+            if (isWingMesh) {
+              m.transparent = true;
+              m.opacity = 0.9;
+            } else {
+              m.transparent = false;
+              m.opacity = 1.0;
+              m.depthWrite = true;
+            }
             mesh.material = m;
           }
         }

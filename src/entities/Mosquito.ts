@@ -403,21 +403,16 @@ export class Mosquito {
         this.gltfModel.position.y = Math.sin(t * flapRate * 1.0) * 0.006;
       }
 
-      // Smooth fade-in from bottom and fade-out at top of climb loop
-      let bossAlpha = 1.0;
-      if (climbPhase < 0.07) {
-        bossAlpha = climbPhase / 0.07;
-      } else if (climbPhase > 0.93) {
-        bossAlpha = (1.0 - climbPhase) / 0.07;
-      }
-
-      this.currentOpacity = bossAlpha;
+      // Boss opacity is ALWAYS high: strictly 100% solid and opaque at all times
+      this.currentOpacity = 1.0;
       for (const mat of this.materials) {
-        mat.transparent = true;
-        if (mat.name === 'wingMat') {
-          mat.opacity = 0.88 * bossAlpha;
+        if (mat.name === 'wingMat' || (mat.name && mat.name.toLowerCase().includes('wing'))) {
+          mat.transparent = true;
+          mat.opacity = 0.9;
         } else {
-          mat.opacity = bossAlpha;
+          mat.transparent = false;
+          mat.opacity = 1.0;
+          mat.depthWrite = true;
         }
       }
       this.group.scale.setScalar(this.baseScale);
