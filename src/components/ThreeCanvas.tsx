@@ -612,7 +612,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let currentKills = 0;
     let accumulatedScreamTime = 0;
     let lastVibrateTime = 0;
-    let lastBossVibrateTime = 0;
     let debugUpdateThrottle = 0;
 
     // Clear all active mosquitoes and debug meshes
@@ -687,8 +686,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const cfg = GAMEPLAY_CONFIG;
 
       if (currentLvl === 3) {
-        // Level 3 Boss: ONLY the King Mosquito, placed at a clear ~5m distance
+        // Level 3 Boss: Complete silence and zero vibration as requested
         buzzManager.stopAll();
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try {
+            navigator.vibrate(0);
+          } catch {}
+        }
         const bossNestPos = new THREE.Vector3(0.0, 1.2, -5.0);
         const bossMos = new Mosquito({
           id: `boss_${nextMosquitoId++}`,
@@ -1149,15 +1153,22 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             // Buzzing audio update for all mosquitoes, including Boss with menacing vibration
             const isBoss = mos.isBoss;
             const speedFactor = isBoss ? 0.35 : (stateRef.current.currentLevel === 2 ? 1.35 : 1.0);
-            buzzManager.updateMosquitoBuzz(
-              mos.id,
-              relPos.x,
-              relPos.y,
-              relPos.z,
-              isBoss,
-              speedFactor,
-              speedRatio
-            );
+            // Buzzing audio update: active for Levels 1 & 2; Level 3 is strictly SILENT
+            if (!mos.isBoss && stateRef.current.currentLevel !== 3) {
+              const speedFactor = stateRef.current.currentLevel === 2 ? 1.35 : 1.0;
+              buzzManager.updateMosquitoBuzz(
+                mos.id,
+                relPos.x,
+                relPos.y,
+                relPos.z,
+                false,
+                speedFactor,
+                speedRatio
+              );
+            } else {
+              // Boss in Level 3 is completely silent
+              buzzManager.stopMosquitoBuzz(mos.id);
+            }
 
             if (dist < minDistance) {
               minDistance = dist;
@@ -1191,22 +1202,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
           }
         }
 
-        // Continuous rhythmic haptic vibration for Level 3 boss
-        if (stateRef.current.currentLevel === 3 && bossInstance && !bossInstance.isDead) {
-          if (now - lastBossVibrateTime > 340) {
-            lastBossVibrateTime = now;
-            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-              try {
-                navigator.vibrate([35, 40]);
-              } catch {
-                // Ignore if permission blocked
-              }
-            }
-          }
-        }
-
-        // Haptic feedback when aiming at a mosquito
-        if (isAimingNear && navigator.vibrate && now - lastVibrateTime > 400) {
+        // Haptic feedback when aiming at a mosquito (disabled in Level 3 for total silence & stillness)
+        if (
+          stateRef.current.currentLevel !== 3 &&
+          isAimingNear &&
+          navigator.vibrate &&
+          now - lastVibrateTime > 400
+        ) {
           try {
             navigator.vibrate(25);
           } catch {

@@ -98,6 +98,14 @@ export class SpatialBuzzManager {
   ) {
     if (!this.ctx || this.isMuted) return;
 
+    // The Level 3 Boss mosquito is completely silent (no buzzing noise)
+    if (isBoss) {
+      if (this.activeVoices.has(id)) {
+        this.stopMosquitoBuzz(id);
+      }
+      return;
+    }
+
     const now = this.ctx.currentTime;
     const distance = Math.max(0.25, Math.sqrt(relX * relX + relY * relY + relZ * relZ));
 
