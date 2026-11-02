@@ -534,12 +534,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         }
       }
 
-      // Smooth camera pan during gentle drags
-      const instantSpeed = Math.hypot(deltaX, deltaY);
-      if (instantSpeed < 45) {
-        sensorManager.addManualLook(-deltaX * 0.0055, -deltaY * 0.0055);
-      }
-
+      // Slicing does not rotate/pan the camera: view remains solidly locked to AR/gyro
       prevPointer = { x: e.clientX, y: e.clientY };
     };
 
@@ -559,10 +554,29 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       bladeDetector.endStroke();
     };
 
+    // Selectively prevent browser viewport scroll/pull-to-refresh without blocking buttons/inputs
+    const handleTouchMovePreventScroll = (e: TouchEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        targetEl &&
+        (targetEl.closest('button') ||
+          targetEl.closest('input') ||
+          targetEl.closest('select') ||
+          targetEl.closest('[data-allow-scroll]'))
+      ) {
+        return; // Retain native touch behavior for interactive UI controls
+      }
+
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
     window.addEventListener('pointerdown', onPointerDown as unknown as EventListener);
     window.addEventListener('pointermove', onPointerMove as unknown as EventListener);
     window.addEventListener('pointerup', onPointerUp as unknown as EventListener);
     window.addEventListener('pointercancel', onPointerCancel as unknown as EventListener);
+    window.addEventListener('touchmove', handleTouchMovePreventScroll, { passive: false });
 
     // --- 7. Keyboard Navigation & F3 for Debug Toggle ---
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -829,6 +843,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     // --- Cleanup ---
     return () => {
       cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('touchmove', handleTouchMovePreventScroll);
       window.removeEventListener('pointerdown', onPointerDown as unknown as EventListener);
       window.removeEventListener('pointermove', onPointerMove as unknown as EventListener);
       window.removeEventListener('pointerup', onPointerUp as unknown as EventListener);
@@ -843,9 +858,21 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
-      <canvas ref={bladeCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none touch-none" />
+    <div
+      ref={containerRef}
+      className="absolute inset-0 h-full w-full overflow-hidden touch-none select-none"
+      style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full touch-none select-none"
+        style={{ touchAction: 'none' }}
+      />
+      <canvas
+        ref={bladeCanvasRef}
+        className="absolute inset-0 h-full w-full pointer-events-none touch-none select-none"
+        style={{ touchAction: 'none' }}
+      />
     </div>
   );
 };
