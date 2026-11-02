@@ -347,32 +347,44 @@ export class Mosquito {
 
     // --- LEVEL 3 BOSS (King Mosquito) ---
     if (this.isBoss) {
-      const forwardDir = camForward
-        ? camForward.clone().normalize()
+      const horizontalForward = camForward
+        ? new THREE.Vector3(camForward.x, 0, camForward.z).normalize()
         : new THREE.Vector3(0, 0, -1);
+      const horizontalRight = new THREE.Vector3(-horizontalForward.z, 0, horizontalForward.x);
 
-      const cycleTime = t * 0.75;
-      const hoverDistance = 2.4 + Math.sin(cycleTime) * 0.95;
+      // Distance kept at ~5.0m so the entire boss is framed clearly within viewport
+      const comfortableDistance = 5.0 + Math.sin(t * 0.8) * 0.35;
 
-      const bossTargetPos = playerPos.clone().addScaledVector(forwardDir, hoverDistance);
-      // Realistic hover jitter
-      bossTargetPos.y += Math.sin(t * 12.0) * 0.035 + Math.cos(t * 18.0) * 0.02;
-      bossTargetPos.x += Math.sin(t * 9.0) * 0.04;
+      // Upward climb: strictly ascending from bottom (-1.9m below eye line) to top (+2.4m above)
+      const climbPeriod = 4.8;
+      const climbPhase = ((t * 0.88 + this.timeOffset) % climbPeriod) / climbPeriod;
+      const verticalClimb = -1.9 + climbPhase * 4.3;
 
+      // Natural lateral micro-sway
+      const lateralSway = Math.sin(t * 1.7) * 0.45;
+
+      const bossTargetPos = playerPos
+        .clone()
+        .addScaledVector(horizontalForward, comfortableDistance)
+        .addScaledVector(horizontalRight, lateralSway);
+      bossTargetPos.y = playerPos.y + verticalClimb;
+
+      // When the player screams, the boss recoils downward and shudders violently
       if (reactiveAudioLevel > 0.05) {
-        const shakeAmt = reactiveAudioLevel * 0.28;
+        const shakeAmt = reactiveAudioLevel * 0.35;
+        bossTargetPos.y -= reactiveAudioLevel * 0.55; // Pushed down by scream shockwave
         bossTargetPos.x += (Math.random() - 0.5) * shakeAmt;
-        bossTargetPos.y += (Math.random() - 0.5) * shakeAmt;
         bossTargetPos.z += (Math.random() - 0.5) * shakeAmt;
       }
 
-      this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.0));
+      this.group.position.lerp(bossTargetPos, Math.min(1.0, delta * 7.5));
 
-      // Strictly upright posture: Rotate around Y to face player, no wild roll/flip
+      // Strictly upright posture with climbing pitch: faces player in yaw, tilted upward into climb
       const toPlayer = playerPos.clone().sub(this.group.position);
       const targetYaw = Math.atan2(toPlayer.x, toPlayer.z) + Math.PI;
       this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, targetYaw, delta * 8.0);
-      this.group.rotation.set(0, this.currentYaw, 0, 'YXZ');
+      // Slight upward body pitch (-0.26 rad) so head/proboscis point up as it ascends
+      this.group.rotation.set(-0.26, this.currentYaw, 0, 'YXZ');
 
       // Wing flapping & flight vibration
       const flapRate = this.flapSpeed * (reactiveAudioLevel > 0.05 ? 1.6 : 1.0);
@@ -391,14 +403,21 @@ export class Mosquito {
         this.gltfModel.position.y = Math.sin(t * flapRate * 1.8) * 0.02;
       }
 
-      this.currentOpacity = 1.0;
+      // Smooth fade-in from bottom and fade-out at top of climb loop
+      let bossAlpha = 1.0;
+      if (climbPhase < 0.07) {
+        bossAlpha = climbPhase / 0.07;
+      } else if (climbPhase > 0.93) {
+        bossAlpha = (1.0 - climbPhase) / 0.07;
+      }
+
+      this.currentOpacity = bossAlpha;
       for (const mat of this.materials) {
+        mat.transparent = true;
         if (mat.name === 'wingMat') {
-          mat.transparent = true;
-          mat.opacity = 0.88;
+          mat.opacity = 0.88 * bossAlpha;
         } else {
-          mat.opacity = 1.0;
-          mat.transparent = false;
+          mat.opacity = bossAlpha;
         }
       }
       this.group.scale.setScalar(this.baseScale);
@@ -461,9 +480,9 @@ export class Mosquito {
     const upDir = new THREE.Vector3(0, 1, 0);
 
     const isLvl2 = this.level === 2;
-    const rad = isLvl2 ? this.nestRadius * 1.6 : this.nestRadius;
-    const sweepAmp = isLvl2 ? 2.4 : 1.3;
-    const freqMult = isLvl2 ? 1.5 : 1.0;
+    const rad = isLvl2 ? this.nestRadius * 1.9 : this.nestRadius;
+    const sweepAmp = isLvl2 ? 3.4 : 1.3;
+    const freqMult = isLvl2 ? 2.5 : 1.0;
 
     const tangentOffset =
       Math.sin(t * (this.freqX1 * freqMult) + this.phaseX) * (rad * sweepAmp) +

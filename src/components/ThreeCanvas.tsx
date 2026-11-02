@@ -686,9 +686,9 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const cfg = GAMEPLAY_CONFIG;
 
       if (currentLvl === 3) {
-        // Level 3 Boss: ONLY the King Mosquito, absolutely no other mosquitoes!
+        // Level 3 Boss: ONLY the King Mosquito, placed at a clear ~5m distance
         buzzManager.stopAll();
-        const bossNestPos = new THREE.Vector3(0.0, 1.6, -2.6);
+        const bossNestPos = new THREE.Vector3(0.0, 1.2, -5.0);
         const bossMos = new Mosquito({
           id: `boss_${nextMosquitoId++}`,
           nestId: 'boss_nest',
@@ -944,7 +944,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             id: mos.id,
             screenX,
             screenY,
-            radiusPx: mos.isBoss ? 160 : 75,
+            radiusPx: mos.isBoss ? 130 : 75,
             isDead: mos.isDead,
             userData: mos,
           });

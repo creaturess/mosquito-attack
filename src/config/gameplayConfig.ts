@@ -25,8 +25,8 @@ export const GAMEPLAY_CONFIG = {
     /** Escala base por defecto */
     baseScale: 1.05,
 
-    /** Escala del jefe gigante (Nivel 3) */
-    bossScale: 4.8,
+    /** Escala del jefe gigante (Nivel 3) - Tamaño calibrado para distinguir forma y detalles con claridad */
+    bossScale: 2.6,
 
     /** Escala mínima garantizada (clamp) a cualquier distancia visible: evita que se vuelva un puntito */
     minScaleFactor: 0.85,
@@ -43,20 +43,20 @@ export const GAMEPLAY_CONFIG = {
     /** Velocidad base de vuelo en m/s en Nivel 1 */
     baseSpeedLvl1: 0.42,
 
-    /** Velocidad base de vuelo en m/s en Nivel 2 (mucho más rápido y cruzando de lado a lado) */
-    baseSpeedLvl2: 1.15,
+    /** Velocidad base de vuelo en m/s en Nivel 2 (mucho más veloz, ágil y cruzando de lado a lado) */
+    baseSpeedLvl2: 2.85,
 
     /** Límite de velocidad angular cuando está a la vista del jugador (grados por segundo en pantalla) */
     maxAngularSpeedDeg: 90,
-    maxAngularSpeedDegLvl2: 140,
+    maxAngularSpeedDegLvl2: 260,
 
     /** Suavizado de giro */
     turnSmoothing: 4.5,
-    turnSmoothingLvl2: 6.2,
+    turnSmoothingLvl2: 10.5,
 
     /** Reducción de velocidad cuando el mosquito está dentro del campo de visión */
     inViewSpeedDamp: 0.88,
-    inViewSpeedDampLvl2: 0.95,
+    inViewSpeedDampLvl2: 1.0,
 
     /** Frecuencia de micro-revoloteo/vibración de vuelo (Hz) */
     flutterFreq: 15.0,
@@ -66,22 +66,22 @@ export const GAMEPLAY_CONFIG = {
 
     /** Intervalo mínimo entre quiebres erráticos de dirección (segundos) */
     dartMinInterval: 0.5,
-    dartMinIntervalLvl2: 0.25,
+    dartMinIntervalLvl2: 0.18,
 
     /** Intervalo máximo entre quiebres erráticos de dirección (segundos) */
     dartMaxInterval: 1.2,
-    dartMaxIntervalLvl2: 0.65,
+    dartMaxIntervalLvl2: 0.45,
 
     /** Multiplicador de velocidad durante un pique o quiebre errático */
     dartSpeedMultiplier: 1.65,
-    dartSpeedMultiplierLvl2: 2.1,
+    dartSpeedMultiplierLvl2: 2.9,
 
     /** Duración del pique errático (segundos) */
     dartDuration: 0.22,
-    dartDurationLvl2: 0.32,
+    dartDurationLvl2: 0.28,
 
     /** Amplitud de cruce transversal de pantalla en Nivel 2 (metros de barrido de izquierda a derecha) */
-    crossSweepRadiusLvl2: 4.6,
+    crossSweepRadiusLvl2: 6.2,
 
     /** Distancia mínima de seguridad a la cámara para que nunca se pegue a la pantalla */
     cameraRepelDistance: 2.8,
