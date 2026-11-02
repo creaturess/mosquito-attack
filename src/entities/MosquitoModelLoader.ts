@@ -122,29 +122,30 @@ class MosquitoModelLoader {
 
     root.add(model);
 
-    // Add glowing compound eyes on the head for high visibility against all AR backgrounds
-    const eyeGeo = new THREE.SphereGeometry(0.065, 8, 8);
+    // Add smaller compound eyes on the head with subtle insect glow
+    const eyeGeo = new THREE.SphereGeometry(0.038, 8, 8);
     const standardEyeMat = new THREE.MeshStandardMaterial({
-      color: 0xff3300,
-      emissive: 0xff2200,
-      emissiveIntensity: 0.95,
-      roughness: 0.2,
+      color: 0x991b1b,
+      emissive: 0x7f1d1d,
+      emissiveIntensity: 0.75,
+      roughness: 0.25,
       metalness: 0.1,
     });
 
     const leftEye = new THREE.Mesh(eyeGeo, standardEyeMat);
     leftEye.name = 'Mosquito_LeftEye';
-    leftEye.position.set(-0.07, 0.05, -0.42);
+    leftEye.position.set(-0.06, 0.04, -0.42);
 
     const rightEye = new THREE.Mesh(eyeGeo, standardEyeMat);
     rightEye.name = 'Mosquito_RightEye';
-    rightEye.position.set(0.07, 0.05, -0.42);
+    rightEye.position.set(0.06, 0.04, -0.42);
 
     root.add(leftEye, rightEye);
 
     this.baseTemplate = root;
 
     // --- Specialized Boss Template (Level 3 King Mosquito) ---
+    // Natural dark obsidian chitin - NOT painted in red, with smaller subtle ruby eyes
     this.bossTemplate = root.clone(true);
     this.bossTemplate.name = 'Mosquito_GLTF_Boss';
 
@@ -152,21 +153,24 @@ class MosquitoModelLoader {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         if (mesh.name === 'Mosquito_LeftEye' || mesh.name === 'Mosquito_RightEye') {
+          // Smaller refined red eyes (not giant glowing orbs)
+          mesh.scale.setScalar(0.75);
           mesh.material = new THREE.MeshStandardMaterial({
-            color: 0xff0044,
-            emissive: 0xff0033,
-            emissiveIntensity: 1.5,
-            roughness: 0.15,
+            color: 0x991b1b,
+            emissive: 0x450a0a,
+            emissiveIntensity: 0.55,
+            roughness: 0.25,
             metalness: 0.1,
           });
         } else if (mesh.material) {
+          // Natural dark charcoal/obsidian chitin (NO red paint)
           const mat = (mesh.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
           mat.side = THREE.DoubleSide;
-          mat.roughness = 0.32;
-          mat.metalness = 0.38;
-          mat.color.setHex(0x380616); // Deep demonic bloodstone crimson
-          mat.emissive.setHex(0x550619);
-          mat.emissiveIntensity = 0.45;
+          mat.roughness = 0.38;
+          mat.metalness = 0.28;
+          mat.color.setHex(0x181a1e); // Realistic dark chitin
+          mat.emissive.setHex(0x000000); // Zero red emissive
+          mat.emissiveIntensity = 0.0;
           mesh.material = mat;
         }
       }

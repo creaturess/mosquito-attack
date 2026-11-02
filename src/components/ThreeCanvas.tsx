@@ -944,7 +944,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             id: mos.id,
             screenX,
             screenY,
-            radiusPx: mos.isBoss ? 130 : 75,
+            radiusPx: mos.isBoss ? 150 : 75,
             isDead: mos.isDead,
             userData: mos,
           });

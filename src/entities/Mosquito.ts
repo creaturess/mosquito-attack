@@ -230,7 +230,7 @@ export class Mosquito {
     this.proceduralModel = new THREE.Group();
 
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: this.isBoss ? 0x2b0615 : 0x141619,
+      color: 0x141619,
       roughness: 0.45,
       metalness: 0.15,
       transparent: false,
@@ -247,14 +247,14 @@ export class Mosquito {
     this.materials.push(outlineMat);
 
     const eyeMat = new THREE.MeshBasicMaterial({
-      color: this.isBoss ? 0xff0055 : 0xff2200,
+      color: 0x991b1b,
       transparent: false,
       opacity: 1.0,
     });
     this.materials.push(eyeMat);
 
     const wingMat = new THREE.MeshBasicMaterial({
-      color: this.isBoss ? 0xf472b6 : 0xdbeafe,
+      color: 0xdbeafe,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.85,
@@ -286,12 +286,12 @@ export class Mosquito {
     head.position.set(0, 0.05, -0.32);
     this.proceduralModel.add(head);
 
-    // Eyes
-    const eyeGeo = new THREE.SphereGeometry(0.075, 6, 6);
+    // Eyes (smaller, subtle ruby insect compound eyes)
+    const eyeGeo = new THREE.SphereGeometry(this.isBoss ? 0.042 : 0.05, 6, 6);
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(-0.09, 0.1, -0.38);
+    leftEye.position.set(-0.075, 0.08, -0.38);
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.09, 0.1, -0.38);
+    rightEye.position.set(0.075, 0.08, -0.38);
     this.proceduralModel.add(leftEye, rightEye);
 
     // Proboscis
@@ -480,9 +480,9 @@ export class Mosquito {
     const upDir = new THREE.Vector3(0, 1, 0);
 
     const isLvl2 = this.level === 2;
-    const rad = isLvl2 ? this.nestRadius * 1.9 : this.nestRadius;
-    const sweepAmp = isLvl2 ? 3.4 : 1.3;
-    const freqMult = isLvl2 ? 2.5 : 1.0;
+    const rad = isLvl2 ? this.nestRadius * 1.65 : this.nestRadius;
+    const sweepAmp = isLvl2 ? 2.6 : 1.3;
+    const freqMult = isLvl2 ? 1.85 : 1.0;
 
     const tangentOffset =
       Math.sin(t * (this.freqX1 * freqMult) + this.phaseX) * (rad * sweepAmp) +
