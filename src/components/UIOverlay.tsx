@@ -8,8 +8,8 @@
  * - Level 3 scream attack button
  */
 
-import React, { useState, useEffect } from 'react';
-import { Crosshair, Clock } from 'lucide-react';
+import React from 'react';
+import { Clock } from 'lucide-react';
 import { GameState } from './ThreeCanvas';
 import { sensorManager } from '../sensors/SensorManager';
 
@@ -79,14 +79,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
           <span className={timerColor}>{gameState.timeLeft}s</span>
         </div>
       </div>
-
-      {/* --- CENTRAL RETICLE --- */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="h-6 w-6 rounded-full border border-white/40 bg-black/10 flex items-center justify-center shadow-sm">
-          <Crosshair className="h-3.5 w-3.5 text-white/60" />
-        </div>
-      </div>
-
 
       {/* --- BOTTOM ROW: SCREAM BUTTON (LEVEL 3) --- */}
       <div className="flex items-end justify-end w-full pointer-events-auto">
