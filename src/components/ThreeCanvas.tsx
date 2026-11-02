@@ -612,6 +612,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     let currentKills = 0;
     let accumulatedScreamTime = 0;
     let lastVibrateTime = 0;
+    let lastBossVibrateTime = 0;
     let debugUpdateThrottle = 0;
 
     // Clear all active mosquitoes and debug meshes
@@ -1145,18 +1146,18 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
             const dist = relPos.length();
             const speedRatio = mos.currentSpeed / (mos.baseSpeed || 0.35);
 
-            // King mosquito makes NO noise so player can scream without audio interference
-            if (!mos.isBoss && stateRef.current.currentLevel !== 3) {
-              buzzManager.updateMosquitoBuzz(
-                mos.id,
-                relPos.x,
-                relPos.y,
-                relPos.z,
-                false,
-                1.0,
-                speedRatio
-              );
-            }
+            // Buzzing audio update for all mosquitoes, including Boss with menacing vibration
+            const isBoss = mos.isBoss;
+            const speedFactor = isBoss ? 0.35 : (stateRef.current.currentLevel === 2 ? 1.35 : 1.0);
+            buzzManager.updateMosquitoBuzz(
+              mos.id,
+              relPos.x,
+              relPos.y,
+              relPos.z,
+              isBoss,
+              speedFactor,
+              speedRatio
+            );
 
             if (dist < minDistance) {
               minDistance = dist;
@@ -1185,6 +1186,20 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
                   y: mos.lastExitDirection.y,
                   opacity: alpha,
                 };
+              }
+            }
+          }
+        }
+
+        // Continuous rhythmic haptic vibration for Level 3 boss
+        if (stateRef.current.currentLevel === 3 && bossInstance && !bossInstance.isDead) {
+          if (now - lastBossVibrateTime > 340) {
+            lastBossVibrateTime = now;
+            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+              try {
+                navigator.vibrate([35, 40]);
+              } catch {
+                // Ignore if permission blocked
               }
             }
           }

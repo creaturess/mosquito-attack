@@ -46,7 +46,7 @@ export class SpatialBuzzManager {
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(0.85, this.ctx.currentTime);
+      this.masterGain.gain.setValueAtTime(1.2, this.ctx.currentTime);
       this.masterGain.connect(this.ctx.destination);
       this.distortionCurve = this.createDistortionCurve(18);
     }
@@ -63,7 +63,7 @@ export class SpatialBuzzManager {
   public setMuted(muted: boolean) {
     this.isMuted = muted;
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(muted ? 0 : 0.85, this.ctx.currentTime);
+      this.masterGain.gain.setValueAtTime(muted ? 0 : 1.2, this.ctx.currentTime);
     }
   }
 
@@ -84,10 +84,8 @@ export class SpatialBuzzManager {
 
   /**
    * Starts or updates buzzing sound for a specific mosquito ID at (x, y, z) in camera relative coordinates.
-   * Intensity, timbre and cutoff dynamically react to distance:
-   * - < 0.8m: Intense, piercing in-ear buzz identical to the audio file
-   * - 1.5m - 3m: Moderate directional buzzing
-   * - > 4m: Faint, air-absorbed muffled hum
+   * High-contrast, piercing, unmistakable mosquito whine across all levels,
+   * plus a deep thrumming acoustic vibration for the Level 3 boss.
    */
   public updateMosquitoBuzz(
     id: string,
@@ -100,27 +98,18 @@ export class SpatialBuzzManager {
   ) {
     if (!this.ctx || this.isMuted) return;
 
-    // The king/boss mosquito makes NO noise so player can scream to defeat it without interference
-    if (isBoss) {
-      if (this.activeVoices.has(id)) {
-        this.stopMosquitoBuzz(id);
-      }
-      return;
-    }
-
     const now = this.ctx.currentTime;
     const distance = Math.max(0.25, Math.sqrt(relX * relX + relY * relY + relZ * relZ));
 
-    // --- 3. DISTANCE ROLLOFF (audible guide from 9-10m, crisp and clear at 4-7m) ---
-    const distNorm = Math.max(0, Math.min(1, (10.0 - distance) / 8.5));
+    // High, prominent distance gain curve: stays loud and crisp across entire play space
+    const distNorm = Math.max(0, Math.min(1, (13.0 - distance) / 12.0));
     let distanceGain = isBoss
-      ? Math.max(0.08, Math.min(1.0, Math.pow(distNorm, 1.3) * 0.95 + 0.05))
-      : Math.pow(distNorm, 1.45) * 0.96 + 0.02;
+      ? 1.15
+      : Math.pow(distNorm, 0.7) * 1.05 + 0.22;
 
     let voice = this.activeVoices.get(id);
 
     if (!voice) {
-      // 1. Primary Wing Beat Oscillator (sawtooth wave ~630Hz-670Hz)
       const oscPrimary = this.ctx.createOscillator();
       const oscHarmonic = this.ctx.createOscillator();
       const lfoFlutter = this.ctx.createOscillator();
@@ -133,60 +122,62 @@ export class SpatialBuzzManager {
       const gain = this.ctx.createGain();
       const panner = this.ctx.createPanner();
 
-      // Configure HRTF spatial panner
+      // Configure HRTF spatial panner with gentle rolloff to preserve clear volume
       panner.panningModel = 'HRTF';
       panner.distanceModel = 'inverse';
-      panner.refDistance = 1;
-      panner.maxDistance = 25;
-      panner.rolloffFactor = 1.5;
+      panner.refDistance = 3.5;
+      panner.maxDistance = 30;
+      panner.rolloffFactor = isBoss ? 0.25 : 0.42;
       panner.coneInnerAngle = 360;
 
-      // Base Frequency matching the audio recording:
-      // Real mosquito fundamental is ~635Hz to 670Hz.
-      // In level 2, smaller mosquitoes flap faster -> sharper buzz ~725Hz - 765Hz
-      // Boss has an ominous lower swarm drone at ~220Hz.
+      // Base Frequency:
+      // - Normal mosquitoes: ~640Hz - 750Hz sharp nasal buzz
+      // - Boss: Deep 110Hz thrumming drone with 55Hz sub-vibration
       const baseFreq = isBoss
-        ? 220 + Math.random() * 30
-        : (speedFactor > 1.1 ? 730 + (Math.random() - 0.5) * 45 : 635 + (Math.random() - 0.5) * 40);
+        ? 110 + Math.random() * 8
+        : (speedFactor > 1.1 ? 740 + (Math.random() - 0.5) * 45 : 640 + (Math.random() - 0.5) * 35);
 
       oscPrimary.type = 'sawtooth';
       oscPrimary.frequency.setValueAtTime(baseFreq, now);
 
-      // 2. Harmonic Oscillator (Adds the nasal 2nd/3rd harmonics prominent in the uploaded recording)
+      // Harmonic / Sub-harmonic oscillator
+      // For boss: 0.5x sub-harmonic (55Hz) creates intense deep acoustic rumble
       oscHarmonic.type = isBoss ? 'sawtooth' : 'triangle';
-      oscHarmonic.frequency.setValueAtTime(baseFreq * 2.01, now);
+      oscHarmonic.frequency.setValueAtTime(isBoss ? baseFreq * 0.5 : baseFreq * 2.01, now);
 
-      // 3. Fast Wing-Flutter Vibrato LFO (~380Hz for level 1, ~460Hz for smaller agile level 2 mosquitoes)
+      // Fast Wing-Flutter Vibrato LFO:
+      // For boss: 26Hz heavy vibration modulation
       lfoFlutter.type = 'sawtooth';
-      lfoFlutter.frequency.setValueAtTime(isBoss ? 110 : (speedFactor > 1.1 ? 460 : 380) + Math.random() * 40, now);
-      lfoFlutterGain.gain.setValueAtTime(isBoss ? 45 : (speedFactor > 1.1 ? 75 : 65), now);
+      lfoFlutter.frequency.setValueAtTime(isBoss ? 26 : (speedFactor > 1.1 ? 460 : 390) + Math.random() * 30, now);
+      lfoFlutterGain.gain.setValueAtTime(isBoss ? 75 : (speedFactor > 1.1 ? 85 : 72), now);
 
       lfoFlutter.connect(lfoFlutterGain);
       lfoFlutterGain.connect(oscPrimary.frequency);
       lfoFlutterGain.connect(oscHarmonic.frequency);
 
-      // 4. Slow Pitch Wander LFO (simulates the organic swoop and darting motion)
+      // Pitch wander LFO
       lfoWander.type = 'sine';
-      lfoWander.frequency.setValueAtTime(1.8 + Math.random() * 2.2, now);
-      lfoWanderGain.gain.setValueAtTime(isBoss ? 20 : 35, now);
+      lfoWander.frequency.setValueAtTime(isBoss ? 1.2 : 2.0 + Math.random() * 2.0, now);
+      lfoWanderGain.gain.setValueAtTime(isBoss ? 15 : 35, now);
 
       lfoWander.connect(lfoWanderGain);
       lfoWanderGain.connect(oscPrimary.frequency);
 
-      // 5. Waveshaper saturation for raspy wing buzz
+      // Waveshaper saturation for raspy wing buzz
       if (this.distortionCurve) {
         shaper.curve = this.distortionCurve;
       }
 
-      // 6. Resonant Nasal Peaking Filter (~1900Hz boost for signature mosquito whine)
+      // Nasal / Resonant Peaking Filter:
+      // +14dB boost for signature sharp mosquito whine
       peakingFilter.type = 'peaking';
-      peakingFilter.frequency.setValueAtTime(isBoss ? 900 : 1950, now);
-      peakingFilter.Q.setValueAtTime(3.2, now);
-      peakingFilter.gain.setValueAtTime(8, now); // +8dB nasal boost
+      peakingFilter.frequency.setValueAtTime(isBoss ? 320 : 2150, now);
+      peakingFilter.Q.setValueAtTime(isBoss ? 2.5 : 3.8, now);
+      peakingFilter.gain.setValueAtTime(isBoss ? 10 : 14, now);
 
-      // 7. Distance-Reactive Low-pass Filter (muffled when far, sharp when close)
+      // Distance-Reactive Low-pass Filter
       lowpassFilter.type = 'lowpass';
-      lowpassFilter.frequency.setValueAtTime(4500, now);
+      lowpassFilter.frequency.setValueAtTime(isBoss ? 2600 : 5800, now);
       lowpassFilter.Q.setValueAtTime(1.2, now);
 
       // Initial gain
@@ -194,7 +185,6 @@ export class SpatialBuzzManager {
       gain.gain.linearRampToValueAtTime(Math.max(0.001, distanceGain), now + 0.1);
 
       // Routing:
-      // oscPrimary + oscHarmonic -> shaper -> peakingFilter -> lowpassFilter -> gain -> panner -> masterGain
       oscPrimary.connect(shaper);
       oscHarmonic.connect(shaper);
       shaper.connect(peakingFilter);
