@@ -774,6 +774,9 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         .addScaledVector(_rightDir, moveRight * player.walkSpeed);
 
       player.velocity.lerp(_targetVel, dt * 9.0);
+      if (player.velocity.lengthSq() < 0.0001 && _targetVel.lengthSq() === 0) {
+        player.velocity.set(0, 0, 0);
+      }
       player.position.addScaledVector(player.velocity, dt);
 
       // 4. Physical Pedometer Steps / Accelerometer Direct Stride Displacement
@@ -1079,8 +1082,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         }}
       />
 
-      {/* Initial Exploration & Gyroscope Activation Modal for Mobile Devices */}
-      {!hasStartedExploration && !sensorManager.hasGyroData() && (
+      {/* Initial Exploration & Gyroscope Activation Modal for Mobile & Touch Devices */}
+      {!hasStartedExploration && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
           <div className="w-full max-w-sm rounded-3xl border-2 border-emerald-500/50 bg-stone-950 p-6 text-center text-white shadow-2xl shadow-emerald-950/60">
             <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-950/60 text-3xl">
@@ -1090,7 +1093,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
               Control por Giroscopio
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-stone-300">
-              Sostené el celular frente a ti en una postura cómoda y presioná el botón para calibrar el punto cero e iniciar la exploración 360°.
+              Sostené el celular en tu postura natural y presioná el botón para calibrar el Punto Cero (0,0,0) y activar los sensores con suavizado avanzado.
             </p>
             <button
               data-no-swat="true"

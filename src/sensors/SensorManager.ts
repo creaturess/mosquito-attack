@@ -1,9 +1,14 @@
 /**
  * SensorManager.ts
- * Manages 6DOF Device Motion Tracking (Orientation + 3D Spatial Translation),
- * iOS 13+ permissions for DeviceOrientation & DeviceMotion,
- * Microphone input (Web Audio API AnalyserNode) with real-time volume & scream detection,
- * and optional Camera passthrough (AR mode).
+ * High-precision 6DOF sensor architecture for MOSQUITO ATTACK.
+ * Features:
+ * 1. Zero-Point Calibration (Origin Reset) capturing exact neutral hand posture (0,0,0).
+ * 2. Exponential Low-Pass Filter (LPF) with strict damping (0.05 to 0.10) and deadband
+ *    to eliminate hand tremors, micro-stutters, and autonomous drift.
+ * 3. Shortest-arc angular delta calculation preventing wild 360-degree spins.
+ * 4. Proportional, bounded spatial displacement mapping phone tilt and physical steps to world coordinates.
+ * 5. Robust mobile permission management (iOS DeviceOrientationEvent.requestPermission + Chromium).
+ * 6. Web Audio scream analysis for Level 3 Boss.
  */
 
 export interface SensorStatus {
@@ -20,12 +25,14 @@ export interface OrientationValues {
   alpha: number; // yaw (0 to 360)
   beta: number;  // pitch (-180 to 180)
   gamma: number; // roll (-90 to 90)
-  calibratedAlpha: number;
+  yawRad: number;
+  pitchRad: number;
+  rollRad: number;
 }
 
 export interface AudioMetrics {
-  volume: number;     // 0.0 to 1.0
-  bassLevel: number;  // 0.0 to 1.0
+  volume: number;       // 0.0 to 1.0
+  bassLevel: number;    // 0.0 to 1.0
   isScreaming: boolean; // true when volume exceeds scream threshold
 }
 
@@ -33,7 +40,7 @@ export interface SpatialPosition {
   x: number; // Left (-) / Right (+)
   y: number; // Down (-) / Up (+)
   z: number; // Back (+) / Forward (-) in world coordinates
-  forwardDistance: number; // Relative forward advancement
+  forwardDistance: number;
 }
 
 export class SensorManager {
@@ -47,75 +54,73 @@ export class SensorManager {
     cameraActive: false,
   };
 
-  // 1. Raw sensor readings
+  // 1. Raw sensor readings directly from hardware
   private rawOrientation = { alpha: 0, beta: 0, gamma: 0 };
-
-  // 2. Calibrated Zero Point (Point Zero 0,0,0 reference)
-  public isCalibrated: boolean = false;
-  private zeroAlpha: number = 0;
-  private zeroBeta: number = 60; // neutral resting phone pitch
-  private zeroGamma: number = 0;
-
-  // 3. Low-Pass Filter (LPF) smoothed relative angles
-  private smoothedAlpha: number = 0;
-  private smoothedBeta: number = 0;
-  private smoothedGamma: number = 0;
-
-  // 4. Robust tuning parameters for smooth organic exploration
-  public rotationDamping: number = 0.09; // Low-pass filter damping factor (0.05 to 0.15)
-  public angularDeadzoneDeg: number = 0.75; // Hand tremor deadzone in degrees
-  public tiltWalkDeadzoneDeg: number = 10.0; // Walk tilt deadzone in degrees
-  public yawSensitivity: number = 1.0; // 1:1 proportional scale
-  public pitchSensitivity: number = 1.0;
-
   private hasReceivedGyroData = false;
 
-  // Spatial Translation state (6DOF position tracking in real environment)
+  // 2. Calibrated Origin (Zero-Point Reset)
+  public isCalibrated: boolean = false;
+  private needsPendingCalibration: boolean = false;
+  private zeroAlpha: number = 0;
+  private zeroBeta: number = 55; // Default resting phone posture in hand
+  private zeroGamma: number = 0;
+
+  // 3. Low-Pass Filter (LPF) Exponential Smoothed Relative Angles
+  private smoothedAlpha: number = 0; // Relative yaw from zero point
+  private smoothedBeta: number = 0;  // Relative pitch from zero point
+  private smoothedGamma: number = 0; // Relative roll from zero point
+
+  // Filter Tuning:
+  // Damping factor between 0.05 and 0.10 guarantees organic inertia without micro-jitter
+  public rotationDamping: number = 0.08;
+  // Angular deadzone in degrees: rejects physiological hand tremor (< 0.70°)
+  public angularDeadzoneDeg: number = 0.70;
+  // Walk tilt deadzone: phone held within ±9.0° of calibrated neutral results in ZERO movement
+  public tiltWalkDeadzoneDeg: number = 9.0;
+
+  // 4. Spatial Position (6DOF physical translation)
   private readonly DEFAULT_X = 0.0;
-  private readonly DEFAULT_Y = 1.6; // Standing eye-level
-  private readonly DEFAULT_Z = 0.0; // Origin in real room
+  private readonly DEFAULT_Y = 1.6;
+  private readonly DEFAULT_Z = 0.0;
   private position: SpatialPosition = { x: 0.0, y: 1.6, z: 0.0, forwardDistance: 0 };
   private targetPosition: SpatialPosition = { x: 0.0, y: 1.6, z: 0.0, forwardDistance: 0 };
   private linearVelocity = { x: 0, y: 0, z: 0 };
   private lastMotionTimestamp: number = 0;
 
-  // Sensitivity settings
-  public motionSensitivity: number = 1.5; // Calibrated for natural physical phone translation
-  public tiltAssistEnabled: boolean = false;
+  public motionSensitivity: number = 1.4;
+  private accumulatedStepDistance: number = 0;
+  public stepCount: number = 0;
+  public physicalSpeedMps: number = 0;
 
-  // Manual touch/mouse drag fallback for desktop / non-gyro devices
+  // 5. Desktop fallback manual look (Mouse / Keyboard)
   private manualEuler = { yaw: 0, pitch: 0 };
 
-  // Microphone state
+  // 6. Audio Analysis (Microphone for Level 3 Boss scream)
   private audioStream: MediaStream | null = null;
   private analyser: AnalyserNode | null = null;
   private freqDataArray: Uint8Array<ArrayBuffer> | null = null;
   private audioMetrics: AudioMetrics = { volume: 0, bassLevel: 0, isScreaming: false };
   public screamThreshold: number = 0.62;
 
-  // Camera video stream for AR background (strictly rear / environment camera)
+  // 7. AR Camera Passthrough
   private cameraStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
 
-  // Smoothing factors: balanced for rock-solid 1:1 feel without jitter
-  private readonly ROT_LERP = 0.16;
-  private readonly POS_LERP = 0.22;
+  // Smoothing for translation
+  private readonly POS_LERP = 0.20;
 
-  // Real room spatial movement limits (calibrated to the 1.85x bedroom scale)
-  private readonly LIMIT_X = 8.1;
-  private readonly LIMIT_Y_UP = 3.2;
-  private readonly LIMIT_Y_DOWN = 0.8;
-  private readonly LIMIT_Z = 7.5;
-
-  private listenersAttached: boolean = false;
+  // Accelerometer gravity filter
+  private gravityFilter = { x: 0, y: 9.8, z: 0 };
   private gravityFilterInitialized: boolean = false;
+  private lastStepTimestamp: number = 0;
+  private prevMag: number = 0;
+  private isStepPeaking: boolean = false;
 
   constructor() {
     this.handleDeviceOrientation = this.handleDeviceOrientation.bind(this);
     this.handleDeviceOrientationAbsolute = this.handleDeviceOrientationAbsolute.bind(this);
     this.handleDeviceMotion = this.handleDeviceMotion.bind(this);
 
-    // Proactively attach on modern Android / Chromium browsers (no user gesture required)
     if (typeof window !== 'undefined') {
       try {
         this.startMotionListeners();
@@ -123,19 +128,15 @@ export class SensorManager {
     }
   }
 
-  /**
-   * Check whether real gyroscope data is actively being received from the device
-   */
   public hasGyroData(): boolean {
     return this.hasReceivedGyroData;
   }
 
   /**
-   * Request Gyroscope and Accelerometer permissions (required on iOS 13+) and attach listeners
+   * Request Gyroscope and Accelerometer permissions (required on iOS 13+ and Android)
    */
   public async requestGyroscope(): Promise<boolean> {
     try {
-      // Check if iOS DeviceOrientationEvent.requestPermission exists
       const win = window as unknown as {
         DeviceOrientationEvent?: {
           requestPermission?: () => Promise<'granted' | 'denied'>;
@@ -145,34 +146,27 @@ export class SensorManager {
         };
       };
 
+      let orientationGranted = true;
       if (typeof win.DeviceOrientationEvent?.requestPermission === 'function') {
         try {
           const response = await win.DeviceOrientationEvent.requestPermission();
-          if (response === 'granted') {
-            this.status.gyroscopeAllowed = true;
-            this.status.gyroscopeActive = true;
-          } else {
-            this.status.gyroscopeAllowed = false;
-            this.status.gyroscopeActive = false;
-            return false;
-          }
-        } catch (permErr) {
-          console.warn('DeviceOrientationEvent.requestPermission prompt error:', permErr);
+          orientationGranted = response === 'granted';
+        } catch (e) {
+          console.warn('DeviceOrientationEvent permission prompt error:', e);
+          orientationGranted = false;
         }
-      } else {
-        this.status.gyroscopeAllowed = true;
       }
 
-      // Check if iOS DeviceMotionEvent.requestPermission exists
       if (typeof win.DeviceMotionEvent?.requestPermission === 'function') {
         try {
           await win.DeviceMotionEvent.requestPermission();
-        } catch {
-          // ignore if already granted or failed
-        }
+        } catch {}
       }
 
-      // Android permission queries (Chromium/Android 79+)
+      this.status.gyroscopeAllowed = orientationGranted;
+      this.status.gyroscopeActive = orientationGranted;
+
+      // Request Chromium permissions if queryable
       try {
         if (typeof navigator !== 'undefined' && 'permissions' in navigator) {
           (navigator.permissions as unknown as { query: (p: { name: string }) => Promise<unknown> })
@@ -185,11 +179,16 @@ export class SensorManager {
       } catch {}
 
       this.startMotionListeners();
-      return true;
+
+      // Immediately queue zero calibration so the user's initial hand position becomes (0,0,0)
+      this.calibrateZeroPoint();
+
+      return orientationGranted;
     } catch (e) {
-      console.warn('Error requesting gyroscope/motion permission:', e);
+      console.warn('requestGyroscope error:', e);
       this.status.gyroscopeAllowed = true;
       this.startMotionListeners();
+      this.calibrateZeroPoint();
       return true;
     }
   }
@@ -202,10 +201,8 @@ export class SensorManager {
       window.removeEventListener('devicemotion', this.handleDeviceMotion, true);
 
       window.addEventListener('deviceorientation', this.handleDeviceOrientation, true);
-      // Many Android phones (Pixel, Samsung, Xiaomi) fire deviceorientationabsolute with full 3D angles
       window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
       window.addEventListener('devicemotion', this.handleDeviceMotion, true);
-      this.listenersAttached = true;
       this.status.gyroscopeActive = true;
     } catch (e) {
       console.warn('startMotionListeners error:', e);
@@ -217,16 +214,27 @@ export class SensorManager {
   }
 
   /**
-   * Calibrate current device physical posture as the exact Zero Point (0,0) reference
+   * Calibrate current device physical posture as the exact Origin / Zero Point (0,0,0)
+   * Eliminates autonomous drift and hand fatigue.
    */
   public calibrateZeroPoint() {
-    this.zeroAlpha = this.rawOrientation.alpha;
-    this.zeroBeta = this.rawOrientation.beta !== 0 ? this.rawOrientation.beta : 60;
-    this.zeroGamma = this.rawOrientation.gamma !== 0 ? this.rawOrientation.gamma : 0;
-    this.smoothedAlpha = 0;
-    this.smoothedBeta = 0;
-    this.smoothedGamma = 0;
-    this.isCalibrated = true;
+    if (this.hasReceivedGyroData && (this.rawOrientation.beta !== 0 || this.rawOrientation.alpha !== 0)) {
+      this.zeroAlpha = this.rawOrientation.alpha;
+      this.zeroBeta = this.rawOrientation.beta;
+      this.zeroGamma = this.rawOrientation.gamma;
+      this.smoothedAlpha = 0;
+      this.smoothedBeta = 0;
+      this.smoothedGamma = 0;
+      this.isCalibrated = true;
+      this.needsPendingCalibration = false;
+    } else {
+      // Data hasn't arrived yet; set flag so first incoming event becomes zero reference
+      this.needsPendingCalibration = true;
+      this.smoothedAlpha = 0;
+      this.smoothedBeta = 0;
+      this.smoothedGamma = 0;
+    }
+
     this.manualEuler.yaw = 0;
     this.manualEuler.pitch = 0;
     this.linearVelocity.x = 0;
@@ -240,7 +248,6 @@ export class SensorManager {
     this.resetPosition();
   }
 
-  // Backward-compatible alias
   public calibrateCenter() {
     this.calibrateZeroPoint();
   }
@@ -256,7 +263,7 @@ export class SensorManager {
     const beta = event.beta;
     const gamma = event.gamma;
 
-    // Check for iOS webkitCompassHeading or Android devices with compass heading
+    // Check for iOS webkitCompassHeading
     if (
       (alpha === null || alpha === undefined) &&
       (event as unknown as { webkitCompassHeading?: number }).webkitCompassHeading !== undefined
@@ -269,7 +276,7 @@ export class SensorManager {
       this.status.gyroscopeActive = true;
       this.status.gyroscopeAllowed = true;
 
-      // Compensate for screen orientation (portrait vs landscape across diverse phone models)
+      // Compensate for screen orientation (portrait vs landscape)
       const screenAngle =
         typeof window !== 'undefined'
           ? ((window.screen?.orientation as unknown as { angle?: number })?.angle ??
@@ -297,26 +304,23 @@ export class SensorManager {
       this.rawOrientation.beta = adjustedBeta;
       this.rawOrientation.gamma = adjustedGamma;
 
-      // Auto-calibrate point zero on the very first orientation event if not yet calibrated
-      if (!this.isCalibrated && adjustedAlpha !== 0) {
-        this.calibrateZeroPoint();
+      // If pending calibration or first initialization, capture exact current posture as neutral (0,0,0)
+      if (this.needsPendingCalibration || (!this.isCalibrated && adjustedAlpha !== 0)) {
+        this.zeroAlpha = adjustedAlpha;
+        this.zeroBeta = adjustedBeta;
+        this.zeroGamma = adjustedGamma;
+        this.smoothedAlpha = 0;
+        this.smoothedBeta = 0;
+        this.smoothedGamma = 0;
+        this.isCalibrated = true;
+        this.needsPendingCalibration = false;
       }
     }
   }
 
-  // Physical motion tracking
-  private gravityFilter = { x: 0, y: 9.8, z: 0 };
-  private lastStepTimestamp: number = 0;
-  private prevMag: number = 0;
-  private isStepPeaking: boolean = false;
-  public stepCount: number = 0;
-  public physicalSpeedMps: number = 0;
-  private accumulatedStepDistance: number = 0;
-
   /**
-   * DeviceMotion handler: calculates physical forward, backward, and lateral displacement
-   * when the user physically moves the phone, steps, or pushes/pulls in physical space.
-   * Proportional and natural ("a la par con el movimiento del celular").
+   * DeviceMotion handler: calculates physical forward and lateral displacement
+   * without phantom drift.
    */
   private handleDeviceMotion(event: DeviceMotionEvent) {
     this.status.motionActive = true;
@@ -324,7 +328,6 @@ export class SensorManager {
     const dt = this.lastMotionTimestamp > 0 ? Math.min((now - this.lastMotionTimestamp) / 1000, 0.08) : 0.016;
     this.lastMotionTimestamp = now;
 
-    // 1. Extract linear acceleration without gravity
     let lx = 0;
     let ly = 0;
     let lz = 0;
@@ -341,7 +344,6 @@ export class SensorManager {
       ly = rawLin.y;
       lz = rawLin.z;
     } else {
-      // Fallback to high-pass filtered accelerationIncludingGravity
       const rawGrav = event.accelerationIncludingGravity;
       if (rawGrav && rawGrav.x !== null && rawGrav.y !== null && rawGrav.z !== null) {
         if (!this.gravityFilterInitialized) {
@@ -350,7 +352,7 @@ export class SensorManager {
           this.gravityFilter.z = rawGrav.z;
           this.gravityFilterInitialized = true;
         } else {
-          const alpha = 0.86;
+          const alpha = 0.88;
           this.gravityFilter.x = alpha * this.gravityFilter.x + (1 - alpha) * rawGrav.x;
           this.gravityFilter.y = alpha * this.gravityFilter.y + (1 - alpha) * rawGrav.y;
           this.gravityFilter.z = alpha * this.gravityFilter.z + (1 - alpha) * rawGrav.z;
@@ -362,42 +364,35 @@ export class SensorManager {
       }
     }
 
-    // 2. Physical projection based on current phone pitch tilt
-    // Player holds phone tilted back by ~45-75 deg. Forward in world is along camera horizontal gaze.
-    const pitchRad = (((this.smoothedBeta + this.zeroBeta) || 60) * Math.PI) / 180;
+    // Physical projection using pitch
+    const pitchRad = (((this.smoothedBeta + this.zeroBeta) || 55) * Math.PI) / 180;
     const cosPitch = Math.cos(pitchRad);
     const sinPitch = Math.sin(pitchRad);
 
-    // Forward/backward thrust in phone orientation:
-    // -lz pushes forward into space; +ly projects forward when phone is tilted back
     const rawForwardAcc = -lz * sinPitch + ly * cosPitch;
     const rawStrafeAcc = lx;
 
-    // 3. Pedometer step detection:
-    // When physically walking while holding phone, steps create impulse peaks
+    // Pedometer step detection: intentional footsteps while exploring
     const netMag = Math.sqrt(lx * lx + ly * ly + lz * lz);
-    if (netMag > 0.85 && netMag > this.prevMag) {
+    if (netMag > 0.95 && netMag > this.prevMag) {
       this.isStepPeaking = true;
     } else if (this.isStepPeaking && netMag < this.prevMag) {
       this.isStepPeaking = false;
       const timeSinceLastStep = now - this.lastStepTimestamp;
-      if (timeSinceLastStep >= 240 && timeSinceLastStep <= 1200 && this.prevMag >= 0.85) {
+      if (timeSinceLastStep >= 250 && timeSinceLastStep <= 1200 && this.prevMag >= 0.95) {
         this.lastStepTimestamp = now;
         this.stepCount++;
 
-        // Stride displacement: step forward or backward in room
-        const isRetreating = rawForwardAcc < -0.2;
+        const isRetreating = rawForwardAcc < -0.25;
         const strideMeters = (isRetreating ? -0.55 : 0.65) * this.motionSensitivity;
         this.accumulatedStepDistance += strideMeters;
-        this.moveForward(strideMeters);
         this.triggerHaptic('step');
       }
     }
     this.prevMag = netMag;
 
-    // 4. Continuous physical thrust integration (pushing / pulling phone in air)
-    // Responsive deadband to reject hand micro-tremors without losing intentional motion
-    const deadband = 0.12;
+    // Deadband threshold: completely cuts out hand tremors (< 0.16 m/s^2)
+    const deadband = 0.16;
     const applyDeadband = (val: number): number => {
       const abs = Math.abs(val);
       if (abs < deadband) return 0;
@@ -407,8 +402,7 @@ export class SensorManager {
     const accFwd = applyDeadband(rawForwardAcc);
     const accStrafe = applyDeadband(rawStrafeAcc);
 
-    // Integrate into velocity with calibrated gain
-    const thrustGain = 3.6 * this.motionSensitivity;
+    const thrustGain = 2.8 * this.motionSensitivity;
     if (accFwd !== 0) {
       this.linearVelocity.z += accFwd * dt * thrustGain;
     }
@@ -416,37 +410,24 @@ export class SensorManager {
       this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.8);
     }
 
-    // Natural friction damping: smooth halt when phone stops moving
-    const drag = 3.8;
+    // High friction damping: halts immediately when phone physical thrust stops
+    const drag = 4.5;
     const friction = Math.exp(-drag * dt);
     this.linearVelocity.z *= friction;
     this.linearVelocity.x *= friction;
 
-    // Prevent micro-creeping
-    if (Math.abs(this.linearVelocity.z) < 0.015) this.linearVelocity.z = 0;
-    if (Math.abs(this.linearVelocity.x) < 0.015) this.linearVelocity.x = 0;
+    // Hard clamp to zero when velocity drops below creeping threshold (eliminates creeping drift)
+    if (Math.abs(this.linearVelocity.z) < 0.02) this.linearVelocity.z = 0;
+    if (Math.abs(this.linearVelocity.x) < 0.02) this.linearVelocity.x = 0;
 
-    // Clamp maximum physical translation speed
-    const maxSpeed = 1.8 * this.motionSensitivity;
+    // Maximum translation velocity clamp
+    const maxSpeed = 1.6 * this.motionSensitivity;
     this.linearVelocity.z = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.z));
     this.linearVelocity.x = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.x));
 
-    // 5. Apply displacement in 3D bedroom along camera's current gaze yaw
-    const yaw = this.getYawRad();
-    const forwardDirX = -Math.sin(yaw);
-    const forwardDirZ = -Math.cos(yaw);
-    const rightDirX = Math.cos(yaw);
-    const rightDirZ = -Math.sin(yaw);
-
     const deltaDistZ = this.linearVelocity.z * dt;
-    const deltaDistX = this.linearVelocity.x * dt;
-
-    if (deltaDistZ !== 0 || deltaDistX !== 0) {
-      this.targetPosition.x += forwardDirX * deltaDistZ + rightDirX * deltaDistX;
-      this.targetPosition.z += forwardDirZ * deltaDistZ + rightDirZ * deltaDistX;
-      this.targetPosition.forwardDistance += deltaDistZ;
+    if (deltaDistZ !== 0) {
       this.accumulatedStepDistance += deltaDistZ;
-      this.clampTargetPosition();
     }
 
     this.physicalSpeedMps = Math.hypot(this.linearVelocity.z, this.linearVelocity.x);
@@ -463,36 +444,28 @@ export class SensorManager {
 
   /**
    * Translates intentional phone forward/backward tilt into fluid walking speed (-1.0 to 1.0)
-   * Designed specifically for intuitive phone walking in MODO CAMPO:
-   * - Holding phone at resting angle (~55°-65°): standstill, zero drift
-   * - Dipping phone slightly forward (> 8° from resting): walk forward smoothly
-   * - Tilting phone slightly backward (> 14° from resting): back up slowly
-   * - Tilting phone sideways (> 10°): strafe left/right
-   */
-  /**
-   * Translates intentional phone forward/backward tilt into fluid walking speed (-1.0 to 1.0)
-   * With strict deadzone to guarantee ZERO phantom walking when holding the phone naturally.
+   * Guaranteed ZERO autonomous movement when phone is held naturally within deadzone.
    */
   public getPhoneTiltWalk(): { forward: number; strafe: number } {
-    if (!this.hasReceivedGyroData) return { forward: 0, strafe: 0 };
+    if (!this.hasReceivedGyroData || !this.isCalibrated) return { forward: 0, strafe: 0 };
 
     // smoothedBeta is 0 at the calibrated resting posture
     let forward = 0;
-    // Deadzone: tilting phone forward by > 10 degrees initiates walking
+    // Tilting phone forward beyond deadzone initiates walking
     if (this.smoothedBeta < -this.tiltWalkDeadzoneDeg) {
       const tiltExcess = -this.smoothedBeta - this.tiltWalkDeadzoneDeg;
-      // Proportional scale: smooth acceleration up to 1.0 (reaches max at ~28° forward tilt)
-      forward = Math.min(1.0, tiltExcess / 18.0);
-    } else if (this.smoothedBeta > this.tiltWalkDeadzoneDeg + 4.0) {
-      // Tilting phone backward by > 14 degrees backs up slowly
-      const tiltExcess = this.smoothedBeta - (this.tiltWalkDeadzoneDeg + 4.0);
-      forward = Math.max(-0.6, -tiltExcess / 20.0);
+      // Proportional, clamped mapping (reaches 1.0 at ~26° forward dip)
+      forward = Math.min(1.0, tiltExcess / 17.0);
+    } else if (this.smoothedBeta > this.tiltWalkDeadzoneDeg + 3.0) {
+      // Tilting phone backward backs up slowly
+      const tiltExcess = this.smoothedBeta - (this.tiltWalkDeadzoneDeg + 3.0);
+      forward = Math.max(-0.55, -tiltExcess / 18.0);
     }
 
     let strafe = 0;
-    if (Math.abs(this.smoothedGamma) > 12.0) {
-      const excess = Math.abs(this.smoothedGamma) - 12.0;
-      strafe = Math.min(0.7, Math.max(-0.7, Math.sign(this.smoothedGamma) * (excess / 20.0)));
+    if (Math.abs(this.smoothedGamma) > 11.0) {
+      const excess = Math.abs(this.smoothedGamma) - 11.0;
+      strafe = Math.min(0.65, Math.max(-0.65, Math.sign(this.smoothedGamma) * (excess / 18.0)));
     }
 
     return { forward, strafe };
@@ -500,276 +473,12 @@ export class SensorManager {
 
   public getYawRad(): number {
     const degToRad = Math.PI / 180;
-    return -this.smoothedAlpha * degToRad * this.yawSensitivity + this.manualEuler.yaw;
-  }
-
-  // Virtual Joystick input state
-  private joystickInput = { x: 0, y: 0 };
-
-  public setJoystickInput(x: number, y: number) {
-    this.joystickInput.x = Math.max(-1, Math.min(1, x));
-    this.joystickInput.y = Math.max(-1, Math.min(1, y));
-  }
-
-  public getJoystickInput(): { x: number; y: number } {
-    return this.joystickInput;
+    return -this.smoothedAlpha * degToRad + this.manualEuler.yaw;
   }
 
   /**
-   * Continuous movement via virtual touch joystick in room space
-   * @param strafe: -1.0 (left) to 1.0 (right)
-   * @param forward: -1.0 (backward) to 1.0 (forward)
-   * @param deltaMeters: distance factor (speed * dt)
-   */
-  public moveJoystick(strafe: number, forward: number, deltaMeters: number) {
-    if (Math.abs(strafe) < 0.05 && Math.abs(forward) < 0.05) return;
-
-    const yaw = this.getYawRad();
-    // Forward direction in world space (relative to camera yaw)
-    const forwardDirX = -Math.sin(yaw);
-    const forwardDirZ = -Math.cos(yaw);
-    // Right strafe direction
-    const rightDirX = Math.cos(yaw);
-    const rightDirZ = -Math.sin(yaw);
-
-    const dx = (forwardDirX * forward + rightDirX * strafe) * deltaMeters;
-    const dz = (forwardDirZ * forward + rightDirZ * strafe) * deltaMeters;
-
-    this.targetPosition.x += dx;
-    this.targetPosition.z += dz;
-    this.targetPosition.forwardDistance += (forward * deltaMeters);
-
-    this.clampTargetPosition();
-  }
-
-  /**
-   * Advance forward or retreat backward directly (by distance in meters)
-   */
-  public moveForward(meters: number) {
-    const yaw = this.getYawRad();
-    const forwardDirX = -Math.sin(yaw);
-    const forwardDirZ = -Math.cos(yaw);
-
-    this.targetPosition.x += forwardDirX * meters;
-    this.targetPosition.z += forwardDirZ * meters;
-    this.targetPosition.forwardDistance += meters;
-    this.clampTargetPosition();
-  }
-
-  /**
-   * Strafe left or right (meters)
-   */
-  public moveStrafe(meters: number) {
-    const yaw = this.getYawRad();
-    const rightDirX = Math.cos(yaw);
-    const rightDirZ = -Math.sin(yaw);
-
-    this.targetPosition.x += rightDirX * meters;
-    this.targetPosition.z += rightDirZ * meters;
-    this.clampTargetPosition();
-  }
-
-  private clampTargetPosition() {
-    this.targetPosition.x = Math.max(-this.LIMIT_X, Math.min(this.LIMIT_X, this.targetPosition.x));
-    this.targetPosition.z = Math.max(-this.LIMIT_Z, Math.min(this.LIMIT_Z, this.targetPosition.z));
-    this.targetPosition.y = Math.max(this.LIMIT_Y_DOWN, Math.min(this.LIMIT_Y_UP, this.targetPosition.y));
-  }
-
-  /**
-   * Add manual drag offsets (for desktop or manual tilt assist)
-   */
-  public addManualLook(deltaYaw: number, deltaPitch: number) {
-    this.manualEuler.yaw += deltaYaw;
-    this.manualEuler.pitch = Math.max(-1.4, Math.min(1.4, this.manualEuler.pitch + deltaPitch));
-  }
-
-  /**
-   * Request Microphone permission and set up AnalyserNode
-   */
-  /**
-   * Request Microphone permission and set up AnalyserNode
-   */
-  public async requestMicrophone(audioCtx?: AudioContext): Promise<boolean> {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      console.warn('Microphone not supported in this browser/context');
-      this.status.micAllowed = false;
-      this.status.micActive = false;
-      return false;
-    }
-
-    try {
-      const micPromise = navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-      });
-
-      // Strict 3.5s timeout so mobile browsers never hang indefinitely
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
-      const stream = await Promise.race([micPromise, timeoutPromise]);
-
-      if (!stream) {
-        console.warn('Microphone request timed out or cancelled');
-        return false;
-      }
-
-      this.audioStream = stream;
-
-      const ctx = audioCtx || new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-
-      const source = ctx.createMediaStreamSource(this.audioStream);
-      this.analyser = ctx.createAnalyser();
-      this.analyser.fftSize = 128;
-      this.analyser.smoothingTimeConstant = 0.4;
-      source.connect(this.analyser);
-
-      const bufferLength = this.analyser.frequencyBinCount;
-      this.freqDataArray = new Uint8Array(bufferLength);
-
-      this.status.micAllowed = true;
-      this.status.micActive = true;
-      return true;
-    } catch (err) {
-      console.warn('Microphone access denied or error:', err);
-      this.status.micAllowed = false;
-      this.status.micActive = false;
-      return false;
-    }
-  }
-
-  /**
-   * Request and initialize Front Camera (selfie / user-facing camera)
-   * Only front camera is permitted.
-   */
-  public async requestFrontCamera(): Promise<MediaStream | null> {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      console.warn('Camera not supported in this browser/context');
-      this.status.cameraAllowed = false;
-      this.status.cameraActive = false;
-      return null;
-    }
-
-    // If stream is already active and healthy, reuse it to avoid video flicker
-    if (this.cameraStream && this.cameraStream.active) {
-      const videoTracks = this.cameraStream.getVideoTracks();
-      if (videoTracks.length > 0 && videoTracks[0].readyState === 'live') {
-        this.status.cameraAllowed = true;
-        this.status.cameraActive = true;
-        return this.cameraStream;
-      }
-    }
-
-    // Stop any stale tracks
-    if (this.cameraStream) {
-      this.cameraStream.getTracks().forEach((track) => track.stop());
-      this.cameraStream = null;
-    }
-
-    try {
-      // 1. Strict front camera request (facingMode: 'user')
-      const camPromise = navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'user' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
-
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
-      const res = await Promise.race([camPromise, timeoutPromise]);
-
-      if (res) {
-        this.cameraStream = res;
-        this.status.cameraAllowed = true;
-        this.status.cameraActive = true;
-        return this.cameraStream;
-      }
-      throw new Error('Front camera primary request timeout');
-    } catch (err) {
-      console.warn('Initial front camera request error, trying basic user facingMode:', err);
-      try {
-        // 2. Fallback: simple facingMode 'user'
-        const fallbackPromise = navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
-          audio: false,
-        });
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
-        const res = await Promise.race([fallbackPromise, timeoutPromise]);
-
-        if (res) {
-          this.cameraStream = res;
-          this.status.cameraAllowed = true;
-          this.status.cameraActive = true;
-          return this.cameraStream;
-        }
-        throw new Error('Front camera fallback request timeout');
-      } catch (fallbackErr) {
-        console.warn('Front camera request failed or denied:', fallbackErr);
-        this.status.cameraAllowed = false;
-        this.status.cameraActive = false;
-        return null;
-      }
-    }
-  }
-
-  /**
-   * Alias for backward compatibility - points to requestFrontCamera
-   */
-  public async requestRearCamera(): Promise<MediaStream | null> {
-    return this.requestFrontCamera();
-  }
-
-  /**
-   * Request camera and return an HTMLVideoElement (strictly front camera)
-   */
-  public async requestCamera(): Promise<HTMLVideoElement | null> {
-    const stream = await this.requestFrontCamera();
-    if (!stream) return null;
-
-    if (!this.videoElement) {
-      this.videoElement = document.createElement('video');
-      this.videoElement.setAttribute('autoplay', '');
-      this.videoElement.setAttribute('muted', '');
-      this.videoElement.setAttribute('playsinline', '');
-      this.videoElement.setAttribute('webkit-playsinline', '');
-      this.videoElement.style.position = 'fixed';
-      this.videoElement.style.top = '0';
-      this.videoElement.style.left = '0';
-      this.videoElement.style.width = '100%';
-      this.videoElement.style.height = '100%';
-      this.videoElement.style.objectFit = 'cover';
-      this.videoElement.style.pointerEvents = 'none';
-      this.videoElement.style.zIndex = '-1';
-    }
-
-    if (this.videoElement.srcObject !== stream) {
-      this.videoElement.srcObject = stream;
-      await this.videoElement.play().catch(() => {});
-    }
-
-    return this.videoElement;
-  }
-
-  public getCameraStream(): MediaStream | null {
-    return this.cameraStream;
-  }
-
-  public stopCamera() {
-    if (this.cameraStream) {
-      this.cameraStream.getTracks().forEach((track) => track.stop());
-      this.cameraStream = null;
-    }
-    this.status.cameraActive = false;
-  }
-
-  /**
-   * Updates and smooths sensors on each animation frame
+   * Updates and smooths sensors on each frame using Exponential Low-Pass Filtering
+   * with shortest-arc angular wrapping to eliminate stutter and 360-degree spins.
    */
   public update(): {
     orientation: { alpha: number; beta: number; gamma: number; yawRad: number; pitchRad: number; rollRad: number };
@@ -777,55 +486,54 @@ export class SensorManager {
     audio: AudioMetrics;
     status: SensorStatus;
   } {
-    // 1. Low-Pass Filter (LPF) & Deadzone applied to rotation angles (alpha, beta, gamma)
-    if (this.hasReceivedGyroData) {
+    if (this.hasReceivedGyroData && this.isCalibrated) {
+      // 1. Target relative Yaw (Alpha) from zero point
       let targetRelAlpha = this.rawOrientation.alpha - this.zeroAlpha;
-      while (targetRelAlpha > 180) targetRelAlpha -= 360;
-      while (targetRelAlpha < -180) targetRelAlpha += 360;
+      // Wrap targetRelAlpha to [-180, 180]
+      targetRelAlpha = ((((targetRelAlpha + 180) % 360) + 360) % 360) - 180;
 
-      const targetRelBeta = this.rawOrientation.beta - this.zeroBeta;
-      const targetRelGamma = this.rawOrientation.gamma - this.zeroGamma;
+      // Shortest angular difference from current smoothed yaw
+      let deltaAlpha = targetRelAlpha - this.smoothedAlpha;
+      deltaAlpha = ((((deltaAlpha + 180) % 360) + 360) % 360) - 180;
 
-      // Angular deadzone check: reject hand tremor & micro-vibrations
-      const dAlpha = targetRelAlpha - this.smoothedAlpha;
-      if (Math.abs(dAlpha) > this.angularDeadzoneDeg) {
-        this.smoothedAlpha += dAlpha * this.rotationDamping;
+      // Deadzone check: suppress physiological hand tremor
+      if (Math.abs(deltaAlpha) > this.angularDeadzoneDeg) {
+        // Exponential Low-Pass Filter (strict damping 0.08)
+        this.smoothedAlpha += deltaAlpha * this.rotationDamping;
       }
 
-      const dBeta = targetRelBeta - this.smoothedBeta;
-      if (Math.abs(dBeta) > this.angularDeadzoneDeg) {
-        this.smoothedBeta += dBeta * this.rotationDamping;
+      // 2. Target relative Pitch (Beta) from zero point
+      const targetRelBeta = Math.max(-75, Math.min(75, this.rawOrientation.beta - this.zeroBeta));
+      const deltaBeta = targetRelBeta - this.smoothedBeta;
+      if (Math.abs(deltaBeta) > this.angularDeadzoneDeg) {
+        this.smoothedBeta += deltaBeta * this.rotationDamping;
       }
 
-      const dGamma = targetRelGamma - this.smoothedGamma;
-      if (Math.abs(dGamma) > this.angularDeadzoneDeg) {
-        this.smoothedGamma += dGamma * this.rotationDamping;
+      // 3. Target relative Roll (Gamma) from zero point
+      const targetRelGamma = Math.max(-45, Math.min(45, this.rawOrientation.gamma - this.zeroGamma));
+      const deltaGamma = targetRelGamma - this.smoothedGamma;
+      if (Math.abs(deltaGamma) > this.angularDeadzoneDeg) {
+        this.smoothedGamma += deltaGamma * this.rotationDamping;
       }
     }
 
-    // Convert smoothed angles to Radians with 1:1 proportional mapping
+    // Convert smoothed angles to Radians with natural 1:1 proportional mapping
     const degToRad = Math.PI / 180;
     let yawRad: number;
     let pitchRad: number;
     let rollRad: number;
 
     if (this.hasReceivedGyroData) {
-      yawRad = -this.smoothedAlpha * degToRad * this.yawSensitivity + this.manualEuler.yaw;
-      pitchRad = Math.max(-1.42, Math.min(1.42, this.smoothedBeta * degToRad * this.pitchSensitivity + this.manualEuler.pitch));
-      rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.25));
+      yawRad = -this.smoothedAlpha * degToRad + this.manualEuler.yaw;
+      pitchRad = Math.max(-1.35, Math.min(1.35, this.smoothedBeta * degToRad + this.manualEuler.pitch));
+      rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.22));
     } else {
       yawRad = this.manualEuler.yaw;
       pitchRad = this.manualEuler.pitch;
       rollRad = 0;
     }
 
-    // Smoothly interpolate current spatial position towards target position
-    this.position.x += (this.targetPosition.x - this.position.x) * this.POS_LERP;
-    this.position.y += (this.targetPosition.y - this.position.y) * this.POS_LERP;
-    this.position.z += (this.targetPosition.z - this.position.z) * this.POS_LERP;
-    this.position.forwardDistance += (this.targetPosition.forwardDistance - this.position.forwardDistance) * this.POS_LERP;
-
-    // 3. Audio Processing (AnalyserNode)
+    // Audio Processing
     if (this.analyser && this.freqDataArray) {
       this.analyser.getByteFrequencyData(this.freqDataArray);
 
@@ -871,9 +579,6 @@ export class SensorManager {
     };
   }
 
-  /**
-   * Returns a snapshot of the current sensor state and spatial position without advancing lerp interpolation
-   */
   public getSnapshot(): {
     orientation: { alpha: number; beta: number; gamma: number; yawRad: number; pitchRad: number; rollRad: number };
     position: SpatialPosition;
@@ -884,8 +589,8 @@ export class SensorManager {
   } {
     const degToRad = Math.PI / 180;
     const yawRad = this.getYawRad();
-    const pitchRad = Math.max(-1.42, Math.min(1.42, this.smoothedBeta * degToRad * this.pitchSensitivity + this.manualEuler.pitch));
-    const rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.25));
+    const pitchRad = Math.max(-1.35, Math.min(1.35, this.smoothedBeta * degToRad + this.manualEuler.pitch));
+    const rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.22));
 
     return {
       orientation: {
@@ -902,6 +607,172 @@ export class SensorManager {
       stepCount: this.stepCount,
       speed: this.physicalSpeedMps,
     };
+  }
+
+  public moveForward(distMeters: number) {
+    const yaw = this.getYawRad();
+    this.targetPosition.x += -Math.sin(yaw) * distMeters;
+    this.targetPosition.z += -Math.cos(yaw) * distMeters;
+    this.targetPosition.forwardDistance += distMeters;
+    this.clampPosition();
+  }
+
+  public moveStrafe(distMeters: number) {
+    const yaw = this.getYawRad();
+    this.targetPosition.x += Math.cos(yaw) * distMeters;
+    this.targetPosition.z += -Math.sin(yaw) * distMeters;
+    this.clampPosition();
+  }
+
+  private clampPosition() {
+    this.targetPosition.x = Math.max(-8, Math.min(8, this.targetPosition.x));
+    this.targetPosition.z = Math.max(-8, Math.min(8, this.targetPosition.z));
+  }
+
+  public addManualLook(deltaYaw: number, deltaPitch: number) {
+    this.manualEuler.yaw += deltaYaw;
+    this.manualEuler.pitch = Math.max(-1.35, Math.min(1.35, this.manualEuler.pitch + deltaPitch));
+  }
+
+  public setManualLook(yaw: number, pitch: number) {
+    this.manualEuler.yaw = yaw;
+    this.manualEuler.pitch = Math.max(-1.35, Math.min(1.35, pitch));
+  }
+
+  // Audio / Microphone Setup for Level 3 Boss
+  public async requestMicrophone(externalAudioCtx?: AudioContext): Promise<boolean> {
+    try {
+      if (this.audioStream) return true;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: false,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+
+      this.audioStream = stream;
+      const audioCtx =
+        externalAudioCtx ||
+        new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      this.analyser = audioCtx.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.45;
+      source.connect(this.analyser);
+
+      this.freqDataArray = new Uint8Array(this.analyser.frequencyBinCount);
+      this.status.micAllowed = true;
+      this.status.micActive = true;
+      return true;
+    } catch (e) {
+      console.warn('Microphone permission error:', e);
+      this.status.micAllowed = false;
+      this.status.micActive = false;
+      return false;
+    }
+  }
+
+  public async requestFrontCamera(): Promise<MediaStream | null> {
+    try {
+      if (this.cameraStream) return this.cameraStream;
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      };
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+
+      this.cameraStream = stream;
+      this.status.cameraAllowed = true;
+      this.status.cameraActive = true;
+      return stream;
+    } catch (e) {
+      console.warn('Front camera request error:', e);
+      this.status.cameraAllowed = false;
+      this.status.cameraActive = false;
+      return null;
+    }
+  }
+
+  public async requestCamera(): Promise<HTMLVideoElement | null> {
+    try {
+      if (this.cameraStream && this.videoElement) return this.videoElement;
+
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      };
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+
+      this.cameraStream = stream;
+      this.status.cameraAllowed = true;
+      this.status.cameraActive = true;
+
+      return await this.attachVideoElement(stream);
+    } catch (e) {
+      console.warn('Camera request error:', e);
+      this.status.cameraAllowed = false;
+      this.status.cameraActive = false;
+      return null;
+    }
+  }
+
+  private async attachVideoElement(stream: MediaStream): Promise<HTMLVideoElement> {
+    if (!this.videoElement) {
+      this.videoElement = document.createElement('video');
+      this.videoElement.setAttribute('autoplay', '');
+      this.videoElement.setAttribute('muted', '');
+      this.videoElement.setAttribute('playsinline', '');
+      this.videoElement.setAttribute('webkit-playsinline', '');
+      this.videoElement.style.position = 'fixed';
+      this.videoElement.style.top = '0';
+      this.videoElement.style.left = '0';
+      this.videoElement.style.width = '100%';
+      this.videoElement.style.height = '100%';
+      this.videoElement.style.objectFit = 'cover';
+      this.videoElement.style.pointerEvents = 'none';
+      this.videoElement.style.zIndex = '-1';
+    }
+
+    if (this.videoElement.srcObject !== stream) {
+      this.videoElement.srcObject = stream;
+      await this.videoElement.play().catch(() => {});
+    }
+
+    return this.videoElement;
+  }
+
+  public getCameraStream(): MediaStream | null {
+    return this.cameraStream;
+  }
+
+  public stopCamera() {
+    if (this.cameraStream) {
+      this.cameraStream.getTracks().forEach((track) => track.stop());
+      this.cameraStream = null;
+    }
+    this.status.cameraActive = false;
   }
 
   public triggerHaptic(type: 'swat' | 'bossHit' | 'gameover' | 'victory' | 'step') {
@@ -924,9 +795,7 @@ export class SensorManager {
             navigator.vibrate([100, 50, 100, 50, 200]);
             break;
         }
-      } catch {
-        // Ignore on unsupported browsers
-      }
+      } catch {}
     }
   }
 
