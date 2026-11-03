@@ -1,17 +1,18 @@
 /**
  * FieldCanvas.tsx
  * MODO CAMPO (Field Mode) 3D Viewport:
- * - Lush, realistic 3D outdoor meadow with rolling terrain, tall green grass, wildflowers, composite trees
- * - Golden afternoon sky, warm directional lighting, soft distant atmospheric fog, drifting pollen
- * - First-Person walk & explore navigation:
- *   - PC: WASD / Arrow keys + Mouse look
- *   - Mobile: Virtual floating joystick for walking + right-screen swipe to look
- * - Fruit Ninja blade swipe slicing for killing mosquitoes
- * - Mosquitos flying in from far away in the meadow, circling and buzzing in 3D binaural stereo
- * - Level 1 (20 kills), Level 2 (15 fast kills), Level 3 (Giant Final Boss defeated by screaming)
+ * - Intimate, vibrant outdoor meadow with everything close together (perimeter ~18m)
+ * - Realistic curved grass tufts with multiple arched blades, wind sway, and rich botanical details
+ * - Full 6DOF mobile support:
+ *   - PHYSICAL GYROSCOPE: Pointing and turning the phone looks around 360° in real-time
+ *   - PHYSICAL PHONE MOVEMENT & TILT: Moving the phone forward or tilting advances the player
+ *   - Virtual joystick & WASD hybrid controls
+ * - Mosquitos flying in from nearby tree borders (8m-12m) to orbit tightly around the player (1.5m-2.8m)
+ * - Loud, directional 3D HRTF spatial audio
+ * - Fruit Ninja slicing with glowing blade trail
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { FieldMosquito } from '../entities/FieldMosquito';
 import { BladeSwipeDetector, MosquitoSliceManager, MosquitoScreenTarget } from './ThreeCanvas';
@@ -28,21 +29,95 @@ interface FieldCanvasProps {
   onReturnToMenu?: () => void;
 }
 
-// Procedural Terrain Height Helper
+// Procedural Terrain Height Helper (Compact 22m clearing with surrounding rolling knolls)
 export function getTerrainHeight(x: number, z: number): number {
-  const distFromCenter = Math.hypot(x, z);
-  // Flatten slightly near initial spawn
-  const centerFlatten = Math.min(1.0, distFromCenter / 12.0);
-
+  const dist = Math.hypot(x, z);
+  const centerFlatten = Math.min(1.0, dist / 8.0);
   const baseHill =
-    Math.sin(x * 0.055) * 1.1 +
-    Math.cos(z * 0.045) * 0.95 +
-    Math.sin((x + z) * 0.08) * 0.45;
+    Math.sin(x * 0.08) * 0.6 +
+    Math.cos(z * 0.07) * 0.5 +
+    Math.sin((x + z) * 0.12) * 0.3;
+  // Gentle rim rise starting at 18m
+  const rimRise = dist > 18 ? Math.pow((dist - 18) * 0.25, 2) * 0.4 : 0;
+  return baseHill * centerFlatten + rimRise;
+}
 
-  // Perimeter rim hills naturally enclosing the meadow
-  const perimeterRise = distFromCenter > 38 ? Math.pow((distFromCenter - 38) * 0.16, 2) * 0.5 : 0;
+/**
+ * Creates realistic, curved, multi-blade grass tuft geometry with natural arching droop
+ */
+function createCurvedGrassTuftGeometry(bladeCount: number = 7): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
 
-  return (baseHill * centerFlatten + perimeterRise);
+  const segments = 4; // Height segments for smooth parabolic curve
+  let vertexOffset = 0;
+
+  for (let b = 0; b < bladeCount; b++) {
+    // Random radial angle and curvature direction
+    const bladeAngle = (b / bladeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+    const curveAngle = bladeAngle + (Math.random() - 0.5) * 0.5;
+    const bladeHeight = 0.85 + Math.random() * 0.5; // 0.85m to 1.35m tall
+    const baseWidth = 0.065 + Math.random() * 0.02;
+    const maxArch = 0.28 + Math.random() * 0.32; // arching curve offset
+
+    const cosB = Math.cos(bladeAngle);
+    const sinB = Math.sin(bladeAngle);
+    const cosC = Math.cos(curveAngle);
+    const sinC = Math.sin(curveAngle);
+
+    for (let s = 0; s <= segments; s++) {
+      const t = s / segments;
+      // Parabolic curve bending outward with gravity
+      const droop = Math.pow(t, 1.8) * maxArch;
+      const y = t * bladeHeight - droop * 0.3;
+      const width = baseWidth * (1.0 - Math.pow(t, 0.9)); // taper towards tip
+
+      // Left vertex
+      const lx = cosB * (-width) + cosC * droop;
+      const lz = sinB * (-width) + sinC * droop;
+      positions.push(lx, y, lz);
+      normals.push(-sinB, 0.4, cosB);
+      uvs.push(0, t);
+
+      // Color gradient: deep green root -> fresh leaf green -> golden sunlit tip
+      const r = THREE.MathUtils.lerp(0.12, 0.68, Math.pow(t, 1.4));
+      const g = THREE.MathUtils.lerp(0.32, 0.88, t);
+      const bl = THREE.MathUtils.lerp(0.12, 0.22, t);
+      colors.push(r, g, bl);
+
+      // Right vertex
+      const rx = cosB * width + cosC * droop;
+      const rz = sinB * width + sinC * droop;
+      positions.push(rx, y, rz);
+      normals.push(sinB, 0.4, -cosB);
+      uvs.push(1, t);
+      colors.push(r, g, bl);
+
+      if (s < segments) {
+        const v0 = vertexOffset + s * 2;
+        const v1 = v0 + 1;
+        const v2 = v0 + 2;
+        const v3 = v0 + 3;
+        // Two triangles per segment
+        indices.push(v0, v1, v2);
+        indices.push(v1, v3, v2);
+      }
+    }
+    vertexOffset += (segments + 1) * 2;
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+
+  return geom;
 }
 
 export const FieldCanvas: React.FC<FieldCanvasProps> = ({
@@ -80,23 +155,27 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   const joystickTouchIdRef = useRef<number | null>(null);
   const lookTouchIdRef = useRef<number | null>(null);
   const lastLookPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  // Virtual joystick movement vector [-1..1]
   const joystickMoveRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Manual look rotation offsets (mouse or touch swipe)
+  const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current || !bladeCanvasRef.current) return;
+
+    // Calibrate sensor center when entering Field Mode
+    sensorManager.calibrateCenter();
 
     const width = containerRef.current.clientWidth || window.innerWidth;
     const height = containerRef.current.clientHeight || window.innerHeight;
 
     // --- 1. Scene, Camera, Renderer ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xdceee2);
+    scene.background = new THREE.Color(0xdcece0);
     // Soft golden-green atmospheric distant fog
-    scene.fog = new THREE.FogExp2(0xd6e5c8, 0.016);
+    scene.fog = new THREE.FogExp2(0xd6e5c8, 0.024);
 
-    const camera = new THREE.PerspectiveCamera(70, width / height, 0.1, 180);
+    const camera = new THREE.PerspectiveCamera(70, width / height, 0.1, 120);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
@@ -119,19 +198,17 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const sliceManager = new MosquitoSliceManager(scene, camera);
 
     // --- 3. Lighting (Warm Afternoon Golden Light) ---
-    // Warm hemisphere ambient light
-    const hemiLight = new THREE.HemisphereLight(0xffecd4, 0x245422, 0.85);
+    const hemiLight = new THREE.HemisphereLight(0xfff0dc, 0x224c1f, 0.9);
     scene.add(hemiLight);
 
-    // Main warm afternoon sun
-    const sunLight = new THREE.DirectionalLight(0xfff1dc, 1.8);
-    sunLight.position.set(50, 45, -60);
+    const sunLight = new THREE.DirectionalLight(0xfff1dc, 1.85);
+    sunLight.position.set(30, 32, -35);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 1024;
     sunLight.shadow.mapSize.height = 1024;
-    sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 160;
-    const d = 35;
+    sunLight.shadow.camera.near = 5;
+    sunLight.shadow.camera.far = 80;
+    const d = 22;
     sunLight.shadow.camera.left = -d;
     sunLight.shadow.camera.right = d;
     sunLight.shadow.camera.top = d;
@@ -139,8 +216,8 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     sunLight.shadow.bias = -0.0006;
     scene.add(sunLight);
 
-    // Soft sky dome with afternoon horizon gradient
-    const skyGeom = new THREE.SphereGeometry(140, 24, 16);
+    // Warm afternoon sky dome
+    const skyGeom = new THREE.SphereGeometry(90, 24, 16);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -157,17 +234,15 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         void main() {
           vec3 dir = normalize(vWorldPosition);
           float y = dir.y;
-          // Gradient from warm golden horizon to vibrant afternoon sky
           vec3 skyTop = vec3(0.32, 0.58, 0.92);
-          vec3 skyMid = vec3(0.58, 0.78, 0.95);
-          vec3 skyHorizon = vec3(0.96, 0.88, 0.75);
-          vec3 groundHaze = vec3(0.84, 0.90, 0.80);
+          vec3 skyHorizon = vec3(0.96, 0.88, 0.74);
+          vec3 groundHaze = vec3(0.82, 0.90, 0.78);
 
           vec3 col;
           if (y > 0.0) {
-            col = mix(skyHorizon, skyTop, pow(y, 0.65));
+            col = mix(skyHorizon, skyTop, pow(y, 0.7));
           } else {
-            col = mix(skyHorizon, groundHaze, clamp(-y * 3.0, 0.0, 1.0));
+            col = mix(skyHorizon, groundHaze, clamp(-y * 2.5, 0.0, 1.0));
           }
           gl_FragColor = vec4(col, 1.0);
         }
@@ -176,9 +251,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const skyMesh = new THREE.Mesh(skyGeom, skyMat);
     scene.add(skyMesh);
 
-    // --- 4. Procedural Meadow Terrain ---
-    const terrainSize = 150;
-    const terrainSegments = 80;
+    // --- 4. Procedural Meadow Terrain (Compact 55m area) ---
+    const terrainSize = 65;
+    const terrainSegments = 64;
     const terrainGeom = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
     terrainGeom.rotateX(-Math.PI / 2);
 
@@ -190,28 +265,25 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     }
     terrainGeom.computeVertexNormals();
 
-    // Procedural lush grass texture via HTML5 canvas
+    // Procedural detailed terrain texture
     const canvasTex = document.createElement('canvas');
     canvasTex.width = 512;
     canvasTex.height = 512;
     const ctx = canvasTex.getContext('2d');
     if (ctx) {
-      // Base vibrant meadow green
-      ctx.fillStyle = '#2f6828';
+      ctx.fillStyle = '#265820';
       ctx.fillRect(0, 0, 512, 512);
-
-      // Noise & flecks
-      for (let i = 0; i < 4000; i++) {
+      for (let i = 0; i < 5000; i++) {
         const nx = Math.random() * 512;
         const ny = Math.random() * 512;
-        const radius = Math.random() * 2.5 + 1;
+        const radius = Math.random() * 2.5 + 0.8;
         const shade = Math.random();
         if (shade > 0.6) {
-          ctx.fillStyle = '#3e8433';
+          ctx.fillStyle = '#38782a';
         } else if (shade > 0.3) {
-          ctx.fillStyle = '#265420';
+          ctx.fillStyle = '#1e4818';
         } else {
-          ctx.fillStyle = '#4f9b42';
+          ctx.fillStyle = '#4c8e38';
         }
         ctx.beginPath();
         ctx.arc(nx, ny, radius, 0, Math.PI * 2);
@@ -221,75 +293,69 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const groundTexture = new THREE.CanvasTexture(canvasTex);
     groundTexture.wrapS = THREE.RepeatWrapping;
     groundTexture.wrapT = THREE.RepeatWrapping;
-    groundTexture.repeat.set(24, 24);
+    groundTexture.repeat.set(12, 12);
     groundTexture.colorSpace = THREE.SRGBColorSpace;
 
     const terrainMat = new THREE.MeshStandardMaterial({
       map: groundTexture,
-      roughness: 0.92,
-      metalness: 0.04,
+      roughness: 0.9,
+      metalness: 0.03,
       flatShading: false,
     });
     const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
     terrainMesh.receiveShadow = true;
     scene.add(terrainMesh);
 
-    // --- 5. Tall Green Grass Tufts (InstancedMesh) ---
-    const grassCount = 2800;
-    // Cross-plane grass blade geometry
-    const bladeGeom = new THREE.PlaneGeometry(0.55, 1.1, 1, 2);
-    bladeGeom.translate(0, 0.55, 0);
+    // --- 5. Realistic Curved Grass Tufts (InstancedMesh) ---
+    const tuftCount = 1800;
+    const curvedGrassGeom = createCurvedGrassTuftGeometry(7);
 
     const grassMat = new THREE.MeshStandardMaterial({
-      color: 0x4aa63b,
-      roughness: 0.85,
-      metalness: 0.02,
+      vertexColors: true,
+      roughness: 0.72,
+      metalness: 0.04,
       side: THREE.DoubleSide,
     });
-    const grassInstanced = new THREE.InstancedMesh(bladeGeom, grassMat, grassCount);
+    const grassInstanced = new THREE.InstancedMesh(curvedGrassGeom, grassMat, tuftCount);
     grassInstanced.receiveShadow = true;
 
     const dummy = new THREE.Object3D();
-    const grassColor = new THREE.Color();
-    const grassPalette = [0x3d8c32, 0x4aa63b, 0x58bf47, 0x2e6e25, 0x6ac955];
+    const tuftBasePositions: { x: number; y: number; z: number; scale: number; rotY: number }[] = [];
 
-    for (let i = 0; i < grassCount; i++) {
-      const radius = 2.0 + Math.pow(Math.random(), 0.75) * 44;
+    // Scatter tightly within radius 18m
+    for (let i = 0; i < tuftCount; i++) {
+      const radius = 1.0 + Math.pow(Math.random(), 0.8) * 19.5;
       const angle = Math.random() * Math.PI * 2;
       const gx = Math.cos(angle) * radius;
       const gz = Math.sin(angle) * radius;
       const gy = getTerrainHeight(gx, gz);
 
-      dummy.position.set(gx, gy, gz);
-      dummy.rotation.y = Math.random() * Math.PI * 2;
-      dummy.rotation.x = (Math.random() - 0.5) * 0.18;
-      dummy.rotation.z = (Math.random() - 0.5) * 0.18;
+      const s = 0.8 + Math.random() * 0.55;
+      const rY = Math.random() * Math.PI * 2;
 
-      const scaleY = 0.8 + Math.random() * 0.65;
-      dummy.scale.set(0.9 + Math.random() * 0.4, scaleY, 0.9 + Math.random() * 0.4);
+      dummy.position.set(gx, gy, gz);
+      dummy.rotation.set((Math.random() - 0.5) * 0.1, rY, (Math.random() - 0.5) * 0.1);
+      dummy.scale.set(s, s, s);
       dummy.updateMatrix();
 
       grassInstanced.setMatrixAt(i, dummy.matrix);
-
-      grassColor.setHex(grassPalette[Math.floor(Math.random() * grassPalette.length)]);
-      grassInstanced.setColorAt(i, grassColor);
+      tuftBasePositions.push({ x: gx, y: gy, z: gz, scale: s, rotY: rY });
     }
     grassInstanced.instanceMatrix.needsUpdate = true;
-    if (grassInstanced.instanceColor) grassInstanced.instanceColor.needsUpdate = true;
     scene.add(grassInstanced);
 
-    // --- 6. Wildflowers (Poppies, Dandelions, Cornflowers, Daisies) ---
-    const flowerCount = 500;
-    const flowerGeom = new THREE.SphereGeometry(0.12, 6, 6);
+    // --- 6. Wildflowers & Botanical Details ---
+    const flowerCount = 450;
+    const flowerGeom = new THREE.SphereGeometry(0.11, 6, 6);
     const flowerMat = new THREE.MeshStandardMaterial({
-      roughness: 0.6,
+      roughness: 0.55,
       metalness: 0.05,
     });
     const flowerInstanced = new THREE.InstancedMesh(flowerGeom, flowerMat, flowerCount);
 
     const flowerColors = [
       0xef4444, // Red poppy
-      0xfacc15, // Yellow buttercup/dandelion
+      0xfacc15, // Golden buttercup
       0xa855f7, // Purple wildflower
       0xffffff, // White daisy
       0xf97316, // Orange wild marigold
@@ -297,14 +363,14 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const flowerColor = new THREE.Color();
 
     for (let i = 0; i < flowerCount; i++) {
-      const radius = 3.0 + Math.pow(Math.random(), 0.8) * 42;
+      const radius = 1.2 + Math.pow(Math.random(), 0.75) * 18.5;
       const angle = Math.random() * Math.PI * 2;
       const fx = Math.cos(angle) * radius;
       const fz = Math.sin(angle) * radius;
-      const fy = getTerrainHeight(fx, fz) + 0.35 + Math.random() * 0.4;
+      const fy = getTerrainHeight(fx, fz) + 0.35 + Math.random() * 0.45;
 
       dummy.position.set(fx, fy, fz);
-      dummy.scale.setScalar(0.7 + Math.random() * 0.8);
+      dummy.scale.setScalar(0.75 + Math.random() * 0.75);
       dummy.updateMatrix();
 
       flowerInstanced.setMatrixAt(i, dummy.matrix);
@@ -315,10 +381,10 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     if (flowerInstanced.instanceColor) flowerInstanced.instanceColor.needsUpdate = true;
     scene.add(flowerInstanced);
 
-    // --- 7. Procedural Composite Trees ---
+    // --- 7. Surrounding Trees (Cozy clearing border ring at 16m-24m) ---
     const treeGroup = new THREE.Group();
     const treeTrunkMat = new THREE.MeshStandardMaterial({
-      color: 0x4a3728,
+      color: 0x483424,
       roughness: 0.95,
       metalness: 0.02,
     });
@@ -331,30 +397,30 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
 
       // Trunk
       const trunkHeight = 4.2 * scale;
-      const trunkGeom = new THREE.CylinderGeometry(0.35 * scale, 0.65 * scale, trunkHeight, 7);
+      const trunkGeom = new THREE.CylinderGeometry(0.32 * scale, 0.58 * scale, trunkHeight, 7);
       trunkGeom.translate(0, trunkHeight * 0.5, 0);
       const trunkMesh = new THREE.Mesh(trunkGeom, treeTrunkMat);
       trunkMesh.castShadow = true;
       trunkMesh.receiveShadow = true;
       tree.add(trunkMesh);
 
-      // Canopy layers (3 to 4 intersecting organic spheres)
+      // Layered canopy
       const foliageMat = new THREE.MeshStandardMaterial({
         color: treeFoliageColors[Math.floor(Math.random() * treeFoliageColors.length)],
-        roughness: 0.88,
+        roughness: 0.86,
         metalness: 0.02,
         flatShading: true,
       });
 
       const canopyCount = 3 + Math.floor(Math.random() * 2);
       for (let c = 0; c < canopyCount; c++) {
-        const rad = (1.8 + Math.random() * 0.8) * scale;
+        const rad = (1.6 + Math.random() * 0.7) * scale;
         const folGeom = new THREE.SphereGeometry(rad, 7, 6);
         const folMesh = new THREE.Mesh(folGeom, foliageMat);
         folMesh.position.set(
-          (Math.random() - 0.5) * 1.2 * scale,
-          trunkHeight + (c * 1.2 - 0.2) * scale,
-          (Math.random() - 0.5) * 1.2 * scale
+          (Math.random() - 0.5) * 1.1 * scale,
+          trunkHeight + (c * 1.1 - 0.2) * scale,
+          (Math.random() - 0.5) * 1.1 * scale
         );
         folMesh.scale.set(1.0 + Math.random() * 0.2, 0.9 + Math.random() * 0.3, 1.0 + Math.random() * 0.2);
         folMesh.castShadow = true;
@@ -365,44 +431,27 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       return tree;
     };
 
-    // Scatter trees: near clumps and perimeter forest ring
-    const treePositions: [number, number, number][] = [
-      // Close clusters
-      [-16, -14, 1.1],
-      [18, -12, 1.2],
-      [-22, 16, 1.0],
-      [24, 18, 1.25],
-      [-12, 22, 0.95],
-      [14, -24, 1.15],
-      [-28, -6, 1.3],
-      [26, -5, 1.2],
-    ];
-
-    // Perimeter grove ring
-    for (let i = 0; i < 28; i++) {
-      const angle = (i / 28) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
-      const dist = 38 + Math.random() * 18;
-      treePositions.push([Math.cos(angle) * dist, Math.sin(angle) * dist, 1.1 + Math.random() * 0.4]);
+    // Compact ring of trees enclosing the clearing closely
+    for (let i = 0; i < 22; i++) {
+      const angle = (i / 22) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+      const dist = 16.5 + Math.random() * 7.5;
+      treeGroup.add(createTree(Math.cos(angle) * dist, Math.sin(angle) * dist, 1.0 + Math.random() * 0.35));
     }
-
-    treePositions.forEach(([x, z, s]) => {
-      treeGroup.add(createTree(x, z, s));
-    });
     scene.add(treeGroup);
 
     // --- 8. Floating Golden Pollen Particles ---
-    const pollenCount = 180;
+    const pollenCount = 120;
     const pollenGeom = new THREE.BufferGeometry();
     const pollenPositions = new Float32Array(pollenCount * 3);
     for (let i = 0; i < pollenCount; i++) {
-      pollenPositions[i * 3 + 0] = (Math.random() - 0.5) * 60;
-      pollenPositions[i * 3 + 1] = 1.0 + Math.random() * 5.0;
-      pollenPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+      pollenPositions[i * 3 + 0] = (Math.random() - 0.5) * 35;
+      pollenPositions[i * 3 + 1] = 0.8 + Math.random() * 4.0;
+      pollenPositions[i * 3 + 2] = (Math.random() - 0.5) * 35;
     }
     pollenGeom.setAttribute('position', new THREE.BufferAttribute(pollenPositions, 3));
     const pollenMat = new THREE.PointsMaterial({
       color: 0xfef08a,
-      size: 0.08,
+      size: 0.07,
       transparent: true,
       opacity: 0.65,
       blending: THREE.AdditiveBlending,
@@ -416,8 +465,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       velocity: new THREE.Vector3(0, 0, 0),
       yaw: 0,
       pitch: 0,
+      roll: 0,
       eyeHeight: 1.65,
-      walkSpeed: 6.8,
+      walkSpeed: 6.5,
     };
     player.position.y = getTerrainHeight(0, 0) + player.eyeHeight;
     camera.position.copy(player.position);
@@ -453,13 +503,12 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    // Mouse look state (PC drag or click)
+    // Mouse look state (PC drag)
     let isMouseDown = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Ignore if clicking on UI overlay buttons
       if ((e.target as HTMLElement)?.closest('[data-no-swat="true"]')) return;
       isMouseDown = true;
       lastMouseX = e.clientX;
@@ -476,9 +525,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
 
-        player.yaw -= dx * 0.0032;
-        player.pitch -= dy * 0.0032;
-        player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+        manualLookRef.current.yaw -= dx * 0.0035;
+        manualLookRef.current.pitch -= dy * 0.0035;
+        manualLookRef.current.pitch = Math.max(-1.3, Math.min(1.3, manualLookRef.current.pitch));
       }
     };
 
@@ -496,8 +545,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const handleTouchStart = (e: TouchEvent) => {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        // If on right half of screen, treat as camera look drag
-        if (touch.clientX > window.innerWidth * 0.42 && lookTouchIdRef.current === null) {
+        if (touch.clientX > window.innerWidth * 0.4 && lookTouchIdRef.current === null) {
           lookTouchIdRef.current = touch.identifier;
           lastLookPosRef.current = { x: touch.clientX, y: touch.clientY };
         }
@@ -513,9 +561,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
           const dy = touch.clientY - lastLookPosRef.current.y;
           lastLookPosRef.current = { x: touch.clientX, y: touch.clientY };
 
-          player.yaw -= dx * 0.0042;
-          player.pitch -= dy * 0.0042;
-          player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+          manualLookRef.current.yaw -= dx * 0.0045;
+          manualLookRef.current.pitch -= dy * 0.0045;
+          manualLookRef.current.pitch = Math.max(-1.3, Math.min(1.3, manualLookRef.current.pitch));
         }
         bladeDetector.addPoint(touch.clientX, touch.clientY);
       }
@@ -541,22 +589,22 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const targetKills = stateRef.current.targetKills;
     const currentLevel = stateRef.current.currentLevel;
 
-    // Spawning waves from far away in the meadow (18m to 35m)
+    // Spawning waves close by (8m to 14m)
     let spawnTimer = 0;
     let totalSpawned = 0;
-    const maxSimultaneous = currentLevel === 3 ? 1 : currentLevel === 2 ? 4 : 3;
+    const maxSimultaneous = currentLevel === 3 ? 1 : currentLevel === 2 ? 5 : 4;
 
     const spawnFieldMosquito = () => {
       if (totalSpawned >= targetKills) return;
 
       const id = `field_mosq_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const angle = Math.random() * Math.PI * 2;
-      // Spawn far away in the meadow
-      const spawnDist = currentLevel === 3 ? 32 : 20 + Math.random() * 12;
+      // Close spawn distance so they arrive immediately
+      const spawnDist = currentLevel === 3 ? 14 : 8.5 + Math.random() * 5.0;
       const sx = player.position.x + Math.cos(angle) * spawnDist;
       const sz = player.position.z + Math.sin(angle) * spawnDist;
       const groundY = getTerrainHeight(sx, sz);
-      const sy = groundY + (currentLevel === 3 ? 3.5 : 1.8 + Math.random() * 2.0);
+      const sy = groundY + (currentLevel === 3 ? 2.8 : 1.6 + Math.random() * 1.4);
 
       const mosq = new FieldMosquito({
         id,
@@ -572,13 +620,19 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       totalSpawned++;
     };
 
-    // Initial batch spawn from afar
+    // Initial batch spawn
     if (currentLevel === 3) {
-      spawnFieldMosquito(); // Giant Boss
+      spawnFieldMosquito(); // Boss
     } else {
       spawnFieldMosquito();
       spawnFieldMosquito();
+      spawnFieldMosquito();
     }
+
+    // Previous forward distance tracker for physical phone translation
+    let prevSensorFwd = 0;
+    let prevSensorX = 0;
+    let prevSensorZ = 0;
 
     // --- 12. Main Animation Loop ---
     let animFrameId: number;
@@ -589,10 +643,52 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       animFrameId = requestAnimationFrame(tick);
 
       const now = performance.now();
-      const delta = Math.min((now - lastTime) / 1000, 0.1);
+      const delta = Math.min((now - lastTime) / 1000, 0.08);
       lastTime = now;
 
-      // 1. Update Player Movement (Keyboard + Virtual Joystick)
+      // 1. Update SensorManager (GYROSCOPE & PHYSICAL PHONE TRANSLATION)
+      const sensorData = sensorManager.update();
+      const { orientation, position: sensorPos, status } = sensorData;
+
+      // GYROSCOPE ORIENTATION:
+      // If gyroscope is active, track physical phone rotation 1:1!
+      if (status.gyroscopeActive) {
+        player.yaw = orientation.yawRad + manualLookRef.current.yaw;
+        player.pitch = orientation.pitchRad + manualLookRef.current.pitch;
+        player.roll = orientation.rollRad;
+      } else {
+        player.yaw = manualLookRef.current.yaw;
+        player.pitch = manualLookRef.current.pitch;
+        player.roll = 0;
+      }
+
+      // Compute forward & right direction vectors in meadow world based on yaw
+      const forwardDir = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+      const rightDir = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+
+      // PHYSICAL PHONE ADVANCE / MOVEMENT ("Mover el teléfono y avanzar")
+      // Integrate physical forward steps / phone thrust displacement
+      const deltaSensorFwd = sensorPos.forwardDistance - prevSensorFwd;
+      prevSensorFwd = sensorPos.forwardDistance;
+
+      const deltaSensorX = sensorPos.x - prevSensorX;
+      prevSensorX = sensorPos.x;
+
+      const deltaSensorZ = sensorPos.z - prevSensorZ;
+      prevSensorZ = sensorPos.z;
+
+      // If user physically stepped/moved the phone forward, translate in meadow:
+      if (Math.abs(deltaSensorFwd) > 0.001) {
+        player.position.addScaledVector(forwardDir, deltaSensorFwd * 1.5);
+      }
+      if (Math.abs(deltaSensorX) > 0.001) {
+        player.position.addScaledVector(rightDir, deltaSensorX * 1.2);
+      }
+      if (Math.abs(deltaSensorZ) > 0.001) {
+        player.position.addScaledVector(forwardDir, deltaSensorZ * 1.2);
+      }
+
+      // CONTROLS: WASD + Virtual Joystick Movement
       let moveForward = 0;
       let moveRight = 0;
 
@@ -605,16 +701,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       moveRight += joystickMoveRef.current.x;
       moveForward -= joystickMoveRef.current.y;
 
-      // Normalize movement vector
       const moveLen = Math.hypot(moveForward, moveRight);
       if (moveLen > 1.0) {
         moveForward /= moveLen;
         moveRight /= moveLen;
       }
-
-      // Compute world direction based on camera yaw
-      const forwardDir = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-      const rightDir = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
 
       const targetVel = new THREE.Vector3()
         .addScaledVector(forwardDir, moveForward * player.walkSpeed)
@@ -623,10 +714,10 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       player.velocity.lerp(targetVel, delta * 9.0);
       player.position.addScaledVector(player.velocity, delta);
 
-      // Clamp player within playable meadow perimeter (radius 44m)
+      // Clamp player within the compact meadow perimeter (radius 18.5m)
       const distFromCenter = Math.hypot(player.position.x, player.position.z);
-      if (distFromCenter > 44) {
-        const factor = 44 / distFromCenter;
+      if (distFromCenter > 18.5) {
+        const factor = 18.5 / distFromCenter;
         player.position.x *= factor;
         player.position.z *= factor;
       }
@@ -639,24 +730,27 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         delta * 8.0
       );
 
-      // Update Camera Transform
+      // Update Camera Transform from Gyro + Player Pos
       camera.position.copy(player.position);
       camera.rotation.set(0, 0, 0);
       camera.rotateY(player.yaw);
       camera.rotateX(player.pitch);
+      if (player.roll !== 0) {
+        camera.rotateZ(player.roll);
+      }
 
       // 2. Poll Scream Metric for Level 3 Boss
       if (currentLevel === 3) {
-        const { audio } = sensorManager.getSnapshot();
+        const { audio } = sensorData;
         if (audio.isScreaming) {
           screamAccumulator += delta;
           onScreamProgressRef.current(screamAccumulator);
 
           if (screamAccumulator >= 10.0 && mosquitoes.length > 0) {
-            // Boss killed!
             const boss = mosquitoes[0];
             boss.dispose(scene);
             buzzManager.playVictorySfx();
+            sensorManager.triggerHaptic('victory');
             onKillRef.current(1, true);
             onLevelCompleteRef.current();
             return;
@@ -667,7 +761,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       // 3. Spawn more mosquitoes in waves if needed
       if (currentLevel < 3 && totalSpawned < targetKills && mosquitoes.length < maxSimultaneous) {
         spawnTimer += delta;
-        if (spawnTimer > 1.8) {
+        if (spawnTimer > 1.2) {
           spawnTimer = 0;
           spawnFieldMosquito();
         }
@@ -699,12 +793,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         const worldPos = mosq.group.position.clone();
         const proj = worldPos.clone().project(camera);
 
-        // Behind camera?
         if (proj.z <= 1.0) {
           const screenX = ((proj.x + 1) * width) / 2;
           const screenY = ((-proj.y + 1) * height) / 2;
           const distToCam = worldPos.distanceTo(camera.position);
-          const screenRadius = Math.max(38, Math.min(180, (width * (mosq.isBoss ? 1.4 : 0.45)) / Math.max(1, distToCam)));
+          const screenRadius = Math.max(45, Math.min(200, (width * (mosq.isBoss ? 1.5 : 0.55)) / Math.max(1, distToCam)));
 
           screenTargets.push({
             id: mosq.id,
@@ -724,7 +817,6 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         if (targetMosq && !targetMosq.isDead && !targetMosq.isBoss) {
           targetMosq.isDead = true;
 
-          // Spawn satisfying sliced mosquito halves
           sliceManager.spawnSlicedHalves(
             targetMosq.group.position,
             targetMosq.group.quaternion,
@@ -738,7 +830,6 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
           buzzManager.stopMosquitoBuzz(targetMosq.id);
           targetMosq.dispose(scene);
 
-          // Remove from active list
           const idx = mosquitoes.indexOf(targetMosq);
           if (idx !== -1) mosquitoes.splice(idx, 1);
 
@@ -758,7 +849,25 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       sliceManager.update(delta);
       bladeDetector.render();
 
-      // 7. Render 3D Scene
+      // 7. Grass Wind Sway Animation
+      const timeSec = now * 0.001;
+      const windSampleCount = Math.min(60, tuftCount);
+      // Sample wind wave across a subset each frame for buttery-smooth performance
+      for (let w = 0; w < windSampleCount; w++) {
+        const idx = (Math.floor(timeSec * 30) + w * 28) % tuftCount;
+        const tuft = tuftBasePositions[idx];
+        if (!tuft) continue;
+
+        const wave = Math.sin(timeSec * 2.8 + tuft.x * 0.35 + tuft.z * 0.35) * 0.14;
+        dummy.position.set(tuft.x, tuft.y, tuft.z);
+        dummy.rotation.set(wave * 0.5, tuft.rotY + wave * 0.3, wave);
+        dummy.scale.set(tuft.scale, tuft.scale, tuft.scale);
+        dummy.updateMatrix();
+        grassInstanced.setMatrixAt(idx, dummy.matrix);
+      }
+      grassInstanced.instanceMatrix.needsUpdate = true;
+
+      // 8. Render 3D Scene
       renderer.render(scene, camera);
     };
 
@@ -793,6 +902,10 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       mosquitoes.forEach((m) => m.dispose(scene));
       sliceManager.clearAll();
       renderer.dispose();
+      curvedGrassGeom.dispose();
+      grassMat.dispose();
+      flowerGeom.dispose();
+      flowerMat.dispose();
     };
   }, []);
 
@@ -859,13 +972,18 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         className="pointer-events-none absolute inset-0 z-10 h-full w-full block"
       />
 
+      {/* Mobile Gyroscope / Motion Indicator Badge */}
+      <div className="pointer-events-none absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/60 px-3 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-md">
+        <span>🧭 Giroscopio 360° Activo</span>
+      </div>
+
       {/* PC Controls Hint Badge */}
       <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/40 bg-black/60 px-4 py-1.5 backdrop-blur-md text-xs font-semibold text-emerald-200">
-        <span>🏃 WASD para caminar</span>
+        <span>🏃 WASD / Mover teléfono para avanzar</span>
         <span className="text-emerald-500">•</span>
-        <span>🖱️ Arrastrar para mirar</span>
+        <span>🧭 Giroscopio / Mouse para mirar</span>
         <span className="text-emerald-500">•</span>
-        <span>⚔️ Deslizar rápido para cortar</span>
+        <span>⚔️ Deslizar para cortar</span>
       </div>
 
       {/* Return to Menu Button */}
@@ -879,7 +997,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         </button>
       )}
 
-      {/* Mobile Virtual Joystick */}
+      {/* Mobile Virtual Joystick (Hybrid assist) */}
       <div
         data-no-swat="true"
         onTouchStart={handleJoystickTouchStart}
@@ -888,9 +1006,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         onTouchCancel={handleJoystickTouchEnd}
         className="sm:hidden absolute bottom-8 left-6 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/40 bg-black/50 backdrop-blur-sm shadow-xl active:border-emerald-400/70"
       >
-        {/* Joystick Base Ring */}
         <div className="h-14 w-14 rounded-full border border-emerald-500/30 bg-emerald-950/40 flex items-center justify-center">
-          {/* Draggable Thumb Knob */}
           <div
             className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500 to-emerald-400 shadow-lg border-2 border-white/80 transition-transform duration-75"
             style={{

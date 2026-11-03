@@ -80,22 +80,22 @@ export class FieldMosquito {
     this.isBoss = !!options.isBoss;
     this.level = options.level || 1;
 
-    // Movement speeds for Field Mode
+    // Movement speeds and tighter orbits for Field Mode
     if (this.isBoss) {
-      this.baseSpeed = 4.2;
+      this.baseSpeed = 4.8;
       this.flapSpeed = 38;
       this.baseScale = 1.35;
-      this.orbitRadius = 3.6;
+      this.orbitRadius = 2.2;
     } else if (this.level === 2) {
-      this.baseSpeed = 8.5; // Fast in Level 2
+      this.baseSpeed = 7.5; // Fast in Level 2
       this.flapSpeed = 68;
-      this.baseScale = 0.28;
-      this.orbitRadius = 2.4 + Math.random() * 2.6;
-    } else {
-      this.baseSpeed = 5.2; // Moderate in Level 1
-      this.flapSpeed = 54;
       this.baseScale = 0.32;
-      this.orbitRadius = 2.8 + Math.random() * 3.2;
+      this.orbitRadius = 1.4 + Math.random() * 1.3;
+    } else {
+      this.baseSpeed = 5.4; // Lively in Level 1
+      this.flapSpeed = 54;
+      this.baseScale = 0.36;
+      this.orbitRadius = 1.6 + Math.random() * 1.4;
     }
 
     if (options.scale) {
@@ -106,8 +106,8 @@ export class FieldMosquito {
     this.timeOffset = Math.random() * 100;
     this.flutterPhase = Math.random() * Math.PI * 2;
     this.orbitAngle = Math.random() * Math.PI * 2;
-    this.orbitHeightOffset = (Math.random() - 0.4) * 1.5;
-    this.orbitSpeed = (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 0.7);
+    this.orbitHeightOffset = (Math.random() - 0.5) * 0.9;
+    this.orbitSpeed = (Math.random() > 0.5 ? 1 : -1) * (1.1 + Math.random() * 0.8);
 
     this.group = new THREE.Group();
     this.group.name = `FieldMosquito_${this.id}`;
@@ -232,8 +232,8 @@ export class FieldMosquito {
 
       targetPoint = new THREE.Vector3(targetX, targetY, targetZ);
 
-      // If player moved far away (> 9m), fly back towards player
-      if (distToPlayer > 10.0) {
+      // If player moved away (> 5.5m), fly back towards player immediately
+      if (distToPlayer > 5.5) {
         this.isApproaching = true;
       }
     }

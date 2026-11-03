@@ -82,12 +82,19 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
   const handleStartFieldMode = async () => {
     if (isRequesting || hasCompletedRef.current) return;
     setIsRequesting(true);
-    setRequestStatusText('Preparando el campo...');
+    setRequestStatusText('Iniciando giroscopio, movimiento y audio...');
 
     try {
       buzzManager.init();
     } catch (e) {
       console.warn('AudioContext init error:', e);
+    }
+
+    // Gyroscope & Motion permissions (CRITICAL: must be requested directly in this user tap event!)
+    try {
+      await sensorManager.requestGyroscope();
+    } catch (e) {
+      console.warn('Gyroscope request error in field mode:', e);
     }
 
     // Request microphone for Level 3 boss scream
@@ -98,6 +105,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
       console.warn('Microphone request error:', e);
     }
 
+    setRequestStatusText('¡Listo! Entrando al campo...');
     setTimeout(() => {
       hasCompletedRef.current = true;
       setIsRequesting(false);
