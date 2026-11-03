@@ -14,6 +14,7 @@ interface LevelModalProps {
   kills?: number;
   onContinue: () => void;
   onRestart: () => void;
+  onReturnToMenu?: () => void;
 }
 
 export const LevelModal: React.FC<LevelModalProps> = ({
@@ -21,6 +22,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
   level,
   onContinue,
   onRestart,
+  onReturnToMenu,
 }) => {
   if (type === 'level_start') {
     return (
@@ -108,13 +110,24 @@ export const LevelModal: React.FC<LevelModalProps> = ({
             <span>Zona completamente despejada</span>
           </div>
 
-          <button
-            onClick={onRestart}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-red-600 py-3.5 font-black text-white shadow-lg shadow-emerald-600/30 transition hover:from-emerald-400 hover:to-red-500 active:scale-95"
-          >
-            <RotateCcw className="h-5 w-5" />
-            <span>Jugar de nuevo</span>
-          </button>
+          <div className="flex flex-col gap-2.5">
+            <button
+              onClick={onRestart}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-red-600 py-3.5 font-black text-white shadow-lg shadow-emerald-600/30 transition hover:from-emerald-400 hover:to-red-500 active:scale-95"
+            >
+              <RotateCcw className="h-5 w-5" />
+              <span>Jugar de nuevo</span>
+            </button>
+
+            {onReturnToMenu && (
+              <button
+                onClick={onReturnToMenu}
+                className="w-full rounded-xl border border-white/20 bg-stone-900/80 py-2.5 text-xs font-bold text-stone-300 hover:text-white transition active:scale-95"
+              >
+                CAMBIAR MODO DE JUEGO
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -136,13 +149,24 @@ export const LevelModal: React.FC<LevelModalProps> = ({
           ¡Apunta rápido y no dejes que escapen!
         </div>
 
-        <button
-          onClick={onRestart}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-emerald-600 py-3.5 font-black text-white shadow-lg shadow-red-600/30 transition hover:from-red-500 hover:to-emerald-500 active:scale-95"
-        >
-          <RotateCcw className="h-5 w-5" />
-          <span>Reintentar</span>
-        </button>
+        <div className="flex flex-col gap-2.5">
+          <button
+            onClick={onRestart}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-emerald-600 py-3.5 font-black text-white shadow-lg shadow-red-600/30 transition hover:from-red-500 hover:to-emerald-500 active:scale-95"
+          >
+            <RotateCcw className="h-5 w-5" />
+            <span>Reintentar</span>
+          </button>
+
+          {onReturnToMenu && (
+            <button
+              onClick={onReturnToMenu}
+              className="w-full rounded-xl border border-white/20 bg-stone-900/80 py-2.5 text-xs font-bold text-stone-300 hover:text-white transition active:scale-95"
+            >
+              CAMBIAR MODO DE JUEGO
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
