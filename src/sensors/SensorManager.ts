@@ -212,6 +212,22 @@ export class SensorManager {
     return this.requestSensors();
   }
 
+  // 7b. Scream pulse accumulator for button tapping (Level 3 Boss)
+  private tapScreamAccumulator: number = 0;
+
+  public addScreamPulse(seconds: number = 0.75) {
+    this.tapScreamAccumulator += seconds;
+    this.audioMetrics.volume = Math.max(this.audioMetrics.volume, 0.95);
+    this.audioMetrics.isScreaming = true;
+    this.triggerHaptic('bossHit');
+  }
+
+  public consumeScreamPulse(): number {
+    const pulse = this.tapScreamAccumulator;
+    this.tapScreamAccumulator = 0;
+    return pulse;
+  }
+
   public startMotionListeners() {
     if (typeof window === 'undefined') return;
     try {
@@ -222,7 +238,6 @@ export class SensorManager {
       window.addEventListener('deviceorientation', this.handleDeviceOrientation, true);
       window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
       window.addEventListener('devicemotion', this.handleDeviceMotion, true);
-      this.status.gyroscopeActive = true;
     } catch (e) {
       console.warn('startMotionListeners error:', e);
     }
@@ -267,6 +282,7 @@ export class SensorManager {
     this.gravityFilterInitialized = false;
     this.stepCount = 0;
     this.physicalSpeedMps = 0;
+    this.tapScreamAccumulator = 0;
     this.resetPosition();
   }
 

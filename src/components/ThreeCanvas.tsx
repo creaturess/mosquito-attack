@@ -1154,6 +1154,26 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
       if (stateRef.current.isPlaying) {
         // --- Boss scream mechanic in Level 3 ---
         if (stateRef.current.currentLevel === 3 && bossInstance && !bossInstance.isDead) {
+          const pulse = sensorManager.consumeScreamPulse();
+          if (pulse > 0) {
+            accumulatedScreamTime += pulse;
+            onScreamProgressRef.current(accumulatedScreamTime);
+
+            _lookDir.copy(_camForward);
+            particles.triggerShockwave(camera.position, _lookDir);
+            buzzManager.playBossHurtSfx();
+            sensorManager.triggerHaptic('bossHit');
+
+            if (accumulatedScreamTime >= 10) {
+              bossInstance.kill();
+              particles.emitSplat(bossInstance.group.position, true);
+              buzzManager.stopMosquitoBuzz(bossInstance.id);
+              buzzManager.playVictorySfx();
+              sensorManager.triggerHaptic('victory');
+              onLevelCompleteRef.current();
+            }
+          }
+
           if (audio.isScreaming) {
             accumulatedScreamTime += delta;
             onScreamProgressRef.current(accumulatedScreamTime);

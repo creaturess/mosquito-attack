@@ -52,7 +52,7 @@ export const LevelModal: React.FC<LevelModalProps> = ({
             <p className="text-base font-extrabold text-white leading-relaxed">
               {level === 1 && 'Matá 20 mosquitos'}
               {level === 2 && '15 mosquitos, MENOS TIEMPO y MÁS RÁPIDOS'}
-              {level === 3 && '¡GRITÁ para matarlo!'}
+              {level === 3 && '¡GRITÁ al micrófono o apretá muchas veces el botón GRITAR para matarlo!'}
             </p>
           </div>
 

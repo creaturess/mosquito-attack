@@ -600,31 +600,45 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    // Mouse look state (PC drag)
+    // Mouse look state & Fruit Ninja slicing on PC
     let isMouseDown = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
+    let hasMousePosition = false;
 
     const handleMouseDown = (e: MouseEvent) => {
       if ((e.target as HTMLElement)?.closest('[data-no-swat="true"]')) return;
       isMouseDown = true;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
-      bladeDetector.addPoint(e.clientX, e.clientY);
+      hasMousePosition = true;
+      // Al presionar para rotar la cámara, finaliza el trazo de corte
+      bladeDetector.endStroke();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      bladeDetector.addPoint(e.clientX, e.clientY);
-
-      if (isMouseDown) {
-        const dx = e.clientX - lastMouseX;
-        const dy = e.clientY - lastMouseY;
+      if (!hasMousePosition) {
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
+        hasMousePosition = true;
+        return;
+      }
 
-        manualLookRef.current.yaw -= dx * 0.0035;
-        manualLookRef.current.pitch -= dy * 0.0035;
-        manualLookRef.current.pitch = Math.max(-1.3, Math.min(1.3, manualLookRef.current.pitch));
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+
+      if (isMouseDown) {
+        // CUANDO MANTENÉS EL CLICK: rotar la visión por el espacio
+        if (Math.abs(dx) < 250 && Math.abs(dy) < 250) {
+          manualLookRef.current.yaw -= dx * 0.0035;
+          manualLookRef.current.pitch -= dy * 0.0035;
+          manualLookRef.current.pitch = Math.max(-1.3, Math.min(1.3, manualLookRef.current.pitch));
+        }
+      } else {
+        // CUANDO SOLTÁS EL CLICK (click suelto): matar a los mosquitos cortando con el mouse
+        bladeDetector.addPoint(e.clientX, e.clientY);
       }
     };
 
@@ -633,10 +647,17 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       bladeDetector.endStroke();
     };
 
+    const handleMouseLeave = () => {
+      isMouseDown = false;
+      bladeDetector.endStroke();
+      hasMousePosition = false;
+    };
+
     const containerEl = containerRef.current;
     containerEl.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mouseleave', handleMouseLeave);
 
     // --- 10. Fruit Ninja Blade Swipe Handling (Swiping ONLY cuts mosquitoes, never moves the stage) ---
     const handleTouchStart = (e: TouchEvent) => {
@@ -725,18 +746,16 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
 
       // 1. Update SensorManager (DeviceOrientationEvent & Audio)
       const sensorData = sensorManager.update();
-      const { orientation, status } = sensorData;
-      const hasGyro = sensorManager.hasGyroData() || status.gyroscopeActive;
+      const { orientation } = sensorData;
 
-      // GYROSCOPE ORIENTATION:
-      // Camera orientation depends strictly and exclusively on DeviceOrientationEvent
-      // Invert yaw so turning camera to the right turns the 3D world to the right
-      if (hasGyro) {
-        player.yaw = orientation.yawRad;
-        player.pitch = orientation.pitchRad;
+      // CAMERA ORIENTATION (GYROSCOPE ON MOBILE & MOUSE LOOK ON PC):
+      // When physical gyroscope hardware events are actively incoming, orientation follows phone.
+      // Mouse look is always applied so desktop PC can rotate the screen smoothly with mouse.
+      if (sensorManager.hasGyroData()) {
+        player.yaw = orientation.yawRad + manualLookRef.current.yaw;
+        player.pitch = Math.max(-1.3, Math.min(1.3, orientation.pitchRad + manualLookRef.current.pitch));
         player.roll = orientation.rollRad;
       } else {
-        // Desktop PC fallback when no gyroscope hardware is detected
         player.yaw = manualLookRef.current.yaw;
         player.pitch = manualLookRef.current.pitch;
         player.roll = 0;
@@ -844,22 +863,30 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         dt * 8.0
       );
 
-      // 2. Poll Scream Metric for Level 3 Boss
+      // 2. Poll Scream Metric for Level 3 Boss (Voice scream OR repeated GRITAR button clicks)
       if (currentLevel === 3) {
         const { audio } = sensorData;
+        const pulse = sensorManager.consumeScreamPulse();
+        if (pulse > 0) {
+          screamAccumulator += pulse;
+          buzzManager.playBossHurtSfx();
+          sensorManager.triggerHaptic('bossHit');
+          onScreamProgressRef.current(screamAccumulator);
+        }
+
         if (audio.isScreaming) {
           screamAccumulator += dt;
           onScreamProgressRef.current(screamAccumulator);
+        }
 
-          if (screamAccumulator >= 10.0 && mosquitoes.length > 0) {
-            const boss = mosquitoes[0];
-            boss.dispose(scene);
-            buzzManager.playVictorySfx();
-            sensorManager.triggerHaptic('victory');
-            onKillRef.current(1, true);
-            onLevelCompleteRef.current();
-            return;
-          }
+        if (screamAccumulator >= 10.0 && mosquitoes.length > 0) {
+          const boss = mosquitoes[0];
+          boss.dispose(scene);
+          buzzManager.playVictorySfx();
+          sensorManager.triggerHaptic('victory');
+          onKillRef.current(1, true);
+          onLevelCompleteRef.current();
+          return;
         }
       }
 
@@ -1024,6 +1051,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       containerEl.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseleave', handleMouseLeave);
       containerEl.removeEventListener('touchstart', handleTouchStart);
       containerEl.removeEventListener('touchmove', handleTouchMove);
       containerEl.removeEventListener('touchend', handleTouchEnd);
@@ -1129,17 +1157,19 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
               🧭
             </div>
             <h3 className="text-xl font-black text-emerald-400 uppercase tracking-wide">
-              Control 6DOF: Giroscopio y Traslación
+              Controles del Campo Virtual
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-stone-300">
-              Sostené el celular en tu postura natural y presioná el botón para calibrar el Punto Cero (0,0,0) y activar el seguimiento de rotación y traslación física en el espacio.
+              <strong className="text-emerald-300">En PC:</strong> <span className="text-amber-300 font-bold">Mantené presionado el click</span> para rotar la visión por el espacio. Con el <span className="text-emerald-300 font-bold">click suelto</span>, mové el mouse para rebanar y matar mosquitos.
+              <br className="my-1" />
+              <strong className="text-emerald-300">En móvil:</strong> Usá el giroscopio para mirar en 360°, incliná el teléfono o usá el joystick para caminar.
             </p>
             <button
               data-no-swat="true"
               onClick={handleStartExploration}
               className="mt-5 w-full rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-600 to-green-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-900/50 active:scale-95 transition"
             >
-              ACTIVAR SENSORES E INICIAR
+              ¡COMENZAR A JUGAR!
             </button>
           </div>
         </div>
@@ -1171,11 +1201,11 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/40 bg-black/60 px-4 py-1.5 backdrop-blur-md text-xs font-semibold text-emerald-200"
         style={{ transform: 'translate3d(-50%, 0, 0)' }}
       >
-        <span>🏃 WASD / Flechas para caminar</span>
+        <span>🏃 WASD para caminar</span>
         <span className="text-emerald-500">•</span>
-        <span>🧭 Giroscopio (móvil) / Mouse para mirar</span>
+        <span>🧭 Mantener click para rotar visión</span>
         <span className="text-emerald-500">•</span>
-        <span>⚔️ Deslizar para cortar</span>
+        <span>⚔️ Click suelto para cortar</span>
       </div>
 
       {/* Mobile Walking Guidance Badge */}

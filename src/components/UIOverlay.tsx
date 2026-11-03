@@ -93,15 +93,30 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
       <div className="flex items-end justify-end w-full pointer-events-auto">
         {/* Level 3 Scream Action Button */}
         {gameState.currentLevel === 3 && (
-          <button
-            data-no-swat="true"
-            onPointerDown={() => sensorManager.simulateScream(true)}
-            onPointerUp={() => sensorManager.simulateScream(false)}
-            onPointerLeave={() => sensorManager.simulateScream(false)}
-            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-emerald-600 border-2 border-emerald-400/50 px-5 py-3.5 font-black text-white shadow-xl shadow-red-950/50 active:scale-95 text-xs uppercase tracking-wider"
-          >
-            <span>📢 GRITAR</span>
-          </button>
+          <div className="flex flex-col items-end gap-1.5">
+            <button
+              data-no-swat="true"
+              onClick={(e) => {
+                e.stopPropagation();
+                sensorManager.addScreamPulse(0.75);
+              }}
+              onPointerDown={() => sensorManager.simulateScream(true)}
+              onPointerUp={() => sensorManager.simulateScream(false)}
+              onPointerLeave={() => sensorManager.simulateScream(false)}
+              className="group relative flex items-center gap-3 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 border-2 border-amber-300/80 px-6 py-4 font-black text-white shadow-2xl shadow-red-950/80 active:scale-90 transition-transform select-none cursor-pointer hover:brightness-110"
+              style={{ transform: 'translate3d(0, 0, 0)' }}
+            >
+              <span className="text-2xl animate-bounce">📢</span>
+              <div className="flex flex-col text-left">
+                <span className="text-base font-black tracking-wider uppercase drop-shadow-md">
+                  ¡GRITAR!
+                </span>
+                <span className="text-[10px] font-bold text-amber-200">
+                  Tocá muchas veces o mantené
+                </span>
+              </div>
+            </button>
+          </div>
         )}
       </div>
     </div>
