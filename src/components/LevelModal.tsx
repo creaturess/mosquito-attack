@@ -1,10 +1,11 @@
 /**
  * LevelModal.tsx
- * Dialogs for level briefings, stage victories, game overs, and grand victory.
+ * Dialogs for level briefings, stage victories, game overs, and grand victory
+ * styled in high-impact emerald green and blood red palette with exact user copy.
  */
 
 import React from 'react';
-import { Play, RotateCcw, Trophy, Skull, Flame, ArrowRight, Clock, Target } from 'lucide-react';
+import { Play, RotateCcw, Trophy, Skull, Flame, ArrowRight } from 'lucide-react';
 
 interface LevelModalProps {
   type: 'level_start' | 'level_win' | 'game_over' | 'game_won';
@@ -18,66 +19,47 @@ interface LevelModalProps {
 export const LevelModal: React.FC<LevelModalProps> = ({
   type,
   level,
-  reason,
-  kills,
   onContinue,
   onRestart,
 }) => {
   if (type === 'level_start') {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-        <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900 p-6 text-center text-white shadow-2xl">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-950/60 border border-rose-500/30 text-rose-400">
-            {level === 3 ? <Skull className="h-9 w-9 text-red-500 animate-pulse" /> : <Target className="h-8 w-8 text-rose-400" />}
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
+        <div className="w-full max-w-sm rounded-3xl border-2 border-emerald-500/40 bg-gradient-to-b from-stone-950 via-emerald-950/40 to-black p-6 text-center text-white shadow-2xl shadow-emerald-950/60">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-400 shadow-lg">
+            {level === 3 ? (
+              <Skull className="h-9 w-9 text-red-500 animate-pulse" />
+            ) : (
+              <span className="text-3xl">🦟</span>
+            )}
           </div>
 
-          <span className="rounded-full bg-rose-500/20 px-3 py-1 text-xs font-bold tracking-wider text-rose-400 uppercase">
-            Nivel {level} de 3
-          </span>
-
-          <h2 className="mt-2 text-2xl font-black">
-            {level === 1 && 'Climatización'}
-            {level === 2 && 'Mosquitos Ágiles'}
-            {level === 3 && 'FINAL BOSS: Mosquito Gigante'}
+          <h2 className="text-3xl font-black tracking-wider text-emerald-400 uppercase">
+            {level === 1 && 'NIVEL 1'}
+            {level === 2 && 'NIVEL 2'}
+            {level === 3 && 'JEFE FINAL'}
           </h2>
 
-          <p className="mt-2 text-xs text-slate-300">
-            {level === 1 &&
-              'Aclimatación: Mosquitos dispersos en tu entorno real volando calmadamente. Apunta con la cámara y guíate por su zumbido 3D para encontrarlos.'}
-            {level === 2 &&
-              '¡Invasión veloz! 15 mosquitos cruzan rápidamente de un lado a otro frente a ti. Sigue su trayectoria con la cámara y elimínalos antes de que acabe el tiempo.'}
-            {level === 3 &&
-              '¡El Mosquito Gigante ha aparecido frente a ti en tu cámara! Se moverá solo hacia adelante y hacia atrás mirándote de frente en silencio. ¡GRITA lo más fuerte posible durante 10 segundos para destruirlo!'}
-          </p>
-
-          <div className="my-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-3 text-left">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-amber-400" />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase">Tiempo Límite</div>
-                <div className="font-mono text-sm font-bold text-amber-300">
-                  {level === 1 ? '60 seg' : level === 2 ? '30 seg' : '20 seg'}
-                </div>
-              </div>
+          {level === 3 && (
+            <div className="mt-1 text-sm font-bold text-red-400 tracking-wide">
+              El último mosquito
             </div>
+          )}
 
-            <div className="flex items-center gap-2">
-              {level === 3 ? <Flame className="h-4 w-4 text-rose-400" /> : <Target className="h-4 w-4 text-rose-400" />}
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase">Objetivo</div>
-                <div className="font-mono text-sm font-bold text-rose-300">
-                  {level === 3 ? 'Gritar 10s' : level === 2 ? '15 mosquitos' : '20 mosquitos'}
-                </div>
-              </div>
-            </div>
+          <div className="my-5 rounded-2xl border border-emerald-500/30 bg-black/60 p-4">
+            <p className="text-base font-extrabold text-white leading-relaxed">
+              {level === 1 && 'Matá 20 mosquitos'}
+              {level === 2 && '15 mosquitos, MENOS TIEMPO y MÁS RÁPIDOS'}
+              {level === 3 && '¡GRITÁ para matarlo!'}
+            </p>
           </div>
 
           <button
             onClick={onContinue}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 py-3.5 font-bold text-white shadow-lg shadow-rose-600/30 transition hover:from-rose-500 hover:to-red-500 active:scale-95"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-red-600 py-3.5 font-black text-lg tracking-wider text-white shadow-lg shadow-emerald-900/40 transition hover:from-emerald-400 hover:to-red-500 active:scale-95"
           >
-            <Play className="h-4 w-4 fill-white" />
-            <span>¡COMENZAR NIVEL {level}!</span>
+            <Play className="h-5 w-5 fill-white" />
+            <span>JUGAR</span>
           </button>
         </div>
       </div>
@@ -86,20 +68,20 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
   if (type === 'level_win') {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-        <div className="w-full max-w-sm rounded-3xl border border-emerald-500/30 bg-slate-900 p-6 text-center text-white shadow-2xl">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-400">
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
+        <div className="w-full max-w-sm rounded-3xl border-2 border-emerald-500/50 bg-gradient-to-b from-stone-950 via-emerald-950/40 to-black p-6 text-center text-white shadow-2xl">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-400">
             <Trophy className="h-8 w-8 text-emerald-400 animate-bounce" />
           </div>
 
           <h2 className="text-2xl font-black text-emerald-400">¡NIVEL {level} COMPLETADO!</h2>
-          <p className="mt-1 text-xs text-slate-300">
-            Excelente puntería. Has eliminado los 20 mosquitos a tiempo.
+          <p className="mt-2 text-sm text-emerald-200">
+            {level === 1 ? 'Eliminaste los 20 mosquitos.' : 'Eliminaste los 15 mosquitos veloces.'}
           </p>
 
           <button
             onClick={onContinue}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 py-3.5 font-bold text-white shadow-lg shadow-emerald-600/30 transition hover:from-emerald-500 active:scale-95"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-red-600 py-3.5 font-bold text-white shadow-lg shadow-emerald-600/30 transition hover:from-emerald-400 hover:to-red-500 active:scale-95"
           >
             <span>PASAR AL NIVEL {level + 1}</span>
             <ArrowRight className="h-4 w-4" />
@@ -111,27 +93,27 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
   if (type === 'game_won') {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
-        <div className="w-full max-w-sm rounded-3xl border-2 border-amber-400/50 bg-gradient-to-b from-slate-900 via-slate-900 to-amber-950/40 p-6 text-center text-white shadow-2xl">
-          <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-3xl bg-amber-500/20 border border-amber-400/40 text-amber-300 shadow-lg">
-            <Trophy className="h-10 w-10 text-amber-300 animate-pulse" />
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
+        <div className="w-full max-w-sm rounded-3xl border-2 border-emerald-500/50 bg-gradient-to-b from-stone-950 via-emerald-950/50 to-black p-6 text-center text-white shadow-2xl">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-950/80 border-2 border-emerald-400/50 text-emerald-300 shadow-lg shadow-emerald-500/20">
+            <Trophy className="h-10 w-10 text-emerald-300 animate-pulse" />
           </div>
 
-          <h2 className="text-3xl font-black text-amber-300">¡VICTORIA TOTAL!</h2>
-          <p className="mt-2 text-sm text-slate-200">
-            ¡Tu grito ha desintegrado al <strong className="text-rose-400">Mosquito Gigante</strong>! Has liberado tu entorno de la plaga.
-          </p>
+          <h2 className="text-3xl font-black text-emerald-400 tracking-tight">
+            ¡LOS MATASTE A TODOS!
+          </h2>
 
-          <div className="my-5 rounded-2xl border border-amber-500/30 bg-black/50 p-3 text-xs text-amber-200 font-mono">
-            🏆 Experiencia completada al 100%
+          <div className="my-6 rounded-2xl border border-red-500/30 bg-red-950/30 p-3 text-sm font-semibold text-red-200 flex items-center justify-center gap-2">
+            <Flame className="h-4 w-4 text-red-400" />
+            <span>Zona completamente despejada</span>
           </div>
 
           <button
             onClick={onRestart}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 font-bold text-slate-950 shadow-lg shadow-amber-500/30 transition hover:from-amber-400 hover:to-orange-500 active:scale-95"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-red-600 py-3.5 font-black text-white shadow-lg shadow-emerald-600/30 transition hover:from-emerald-400 hover:to-red-500 active:scale-95"
           >
-            <RotateCcw className="h-4 w-4" />
-            <span>JUGAR DE NUEVO</span>
+            <RotateCcw className="h-5 w-5" />
+            <span>Jugar de nuevo</span>
           </button>
         </div>
       </div>
@@ -140,29 +122,26 @@ export const LevelModal: React.FC<LevelModalProps> = ({
 
   // game_over
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
-      <div className="w-full max-w-sm rounded-3xl border border-rose-600/40 bg-slate-900 p-6 text-center text-white shadow-2xl">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-950/60 border border-rose-500/30 text-rose-500">
-          <Skull className="h-9 w-9 text-rose-500" />
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
+      <div className="w-full max-w-sm rounded-3xl border-2 border-red-600/50 bg-gradient-to-b from-stone-950 via-red-950/40 to-black p-6 text-center text-white shadow-2xl shadow-red-950/50">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-950/80 border border-red-500/40 text-red-500">
+          <Skull className="h-9 w-9 text-red-500 animate-pulse" />
         </div>
 
-        <h2 className="text-2xl font-black text-rose-400">TIEMPO AGOTADO</h2>
-        <p className="mt-2 text-xs text-slate-300">
-          {reason || 'Los mosquitos te han vencido antes de cumplir el objetivo.'}
-        </p>
+        <h2 className="text-3xl font-black tracking-wide text-red-500 uppercase">
+          SE ACABÓ EL TIEMPO
+        </h2>
 
-        {kills !== undefined && level < 3 && (
-          <div className="my-4 rounded-xl bg-slate-950/60 p-3 font-mono text-xs text-slate-400">
-            Eliminaste {kills} de 20 mosquitos requeridos
-          </div>
-        )}
+        <div className="my-6 rounded-2xl border border-red-500/30 bg-black/60 p-3 text-xs text-red-200">
+          ¡Apunta rápido y no dejes que escapen!
+        </div>
 
         <button
           onClick={onRestart}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 py-3.5 font-bold text-white shadow-lg shadow-rose-600/30 transition hover:from-rose-500 active:scale-95"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-emerald-600 py-3.5 font-black text-white shadow-lg shadow-red-600/30 transition hover:from-red-500 hover:to-emerald-500 active:scale-95"
         >
-          <RotateCcw className="h-4 w-4" />
-          <span>REINTENTAR NIVEL {level}</span>
+          <RotateCcw className="h-5 w-5" />
+          <span>Reintentar</span>
         </button>
       </div>
     </div>
