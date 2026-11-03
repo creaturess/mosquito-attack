@@ -554,6 +554,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       prevPosition: new THREE.Vector3(0, 0, 0),
       visualPosition: new THREE.Vector3(0, 0, 0),
       velocity: new THREE.Vector3(0, 0, 0),
+      verticalOffset: 0,
       yaw: 0,
       prevYaw: 0,
       pitch: 0,
@@ -790,6 +791,15 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       inputForward += physTrans.forward;
       inputRight += physTrans.strafe;
 
+      // Vertical physical translation (raising or lowering the phone physically in real space)
+      if (physTrans.up !== 0) {
+        player.verticalOffset += physTrans.up * dt * 2.4;
+      }
+      // Natural spring return to neutral eye level when vertical physical motion stops
+      player.verticalOffset = THREE.MathUtils.lerp(player.verticalOffset, 0, dt * 3.5);
+      // Bound vertical physical offset to human reach limits (-0.8m crouch, +0.8m stretch)
+      player.verticalOffset = Math.max(-0.8, Math.min(0.8, player.verticalOffset));
+
       // 5. Strict Vector Normalization & Uniform Speed Calculation
       const inputLen = Math.hypot(inputForward, inputRight);
       if (inputLen > 0.02) {
@@ -826,11 +836,11 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         player.position.z *= factor;
       }
 
-      // Ground elevation tracking
+      // Ground elevation tracking + vertical physical phone translation
       const targetGroundY = getTerrainHeight(player.position.x, player.position.z);
       player.position.y = THREE.MathUtils.lerp(
         player.position.y,
-        targetGroundY + player.eyeHeight,
+        targetGroundY + player.eyeHeight + player.verticalOffset,
         dt * 8.0
       );
 

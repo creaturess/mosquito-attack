@@ -79,7 +79,7 @@ export class SensorManager {
   public tiltWalkDeadzoneDeg: number = 9.0;
 
   // 4. Physical Spatial Translation state (linear acceleration transformed to camera space)
-  private physicalVelocity = { forward: 0, strafe: 0 };
+  private physicalVelocity = { forward: 0, strafe: 0, up: 0 };
   private readonly ACC_DEADZONE = 0.20; // Deadzone threshold in m/s^2 to eliminate hand tremors
   private readonly VELOCITY_DRAG = 5.8; // High friction velocity dampening for instant braking
   private readonly MAX_PHYS_VEL = 1.8;  // Maximum translation velocity clamp
@@ -258,6 +258,7 @@ export class SensorManager {
     this.manualEuler.pitch = 0;
     this.physicalVelocity.forward = 0;
     this.physicalVelocity.strafe = 0;
+    this.physicalVelocity.up = 0;
     this.linearVelocity.x = 0;
     this.linearVelocity.y = 0;
     this.linearVelocity.z = 0;
@@ -394,8 +395,16 @@ export class SensorManager {
     const cosRoll = Math.cos(rollRad);
     const sinRoll = Math.sin(rollRad);
 
-    const rawForwardAcc = -lz * sinPitch + ly * cosPitch;
-    const rawStrafeAcc = lx * cosRoll + ly * sinRoll;
+    // FIXED COORDINATE TRANSFORMATION:
+    // When the phone is pushed physically forward into real space, the forward acceleration must be positive.
+    // DeviceMotionEvent axes:
+    // - lz represents device Z (positive out of screen/toward user).
+    // - ly represents device Y (positive towards top of screen).
+    // Holding the phone at pitch angle pitchRad:
+    // Pushing the phone forward into space produces positive forward translation.
+    const rawForwardAcc = lz * sinPitch - ly * cosPitch;
+    const rawStrafeAcc = lx * cosRoll - ly * sinRoll;
+    const rawUpAcc = ly * sinPitch + lz * cosPitch;
 
     // Pedometer step detection: intentional footsteps while exploring
     const netMag = Math.sqrt(lx * lx + ly * ly + lz * lz);
@@ -425,6 +434,7 @@ export class SensorManager {
 
     const accFwd = applyDeadzone(rawForwardAcc);
     const accStrafe = applyDeadzone(rawStrafeAcc);
+    const accUp = applyDeadzone(rawUpAcc);
 
     const thrustGain = 2.6 * this.motionSensitivity;
     if (accFwd !== 0) {
@@ -435,17 +445,22 @@ export class SensorManager {
       this.physicalVelocity.strafe += accStrafe * dt * (thrustGain * 0.85);
       this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.85);
     }
+    if (accUp !== 0) {
+      this.physicalVelocity.up += accUp * dt * thrustGain;
+    }
 
     // High friction / velocity dampening: halts immediately when phone physical thrust stops
     const friction = Math.exp(-this.VELOCITY_DRAG * dt);
     this.physicalVelocity.forward *= friction;
     this.physicalVelocity.strafe *= friction;
+    this.physicalVelocity.up *= friction;
     this.linearVelocity.z *= friction;
     this.linearVelocity.x *= friction;
 
     // Hard clamp to zero when velocity drops below creeping threshold (eliminates creeping drift)
     if (Math.abs(this.physicalVelocity.forward) < 0.025) this.physicalVelocity.forward = 0;
     if (Math.abs(this.physicalVelocity.strafe) < 0.025) this.physicalVelocity.strafe = 0;
+    if (Math.abs(this.physicalVelocity.up) < 0.025) this.physicalVelocity.up = 0;
     if (Math.abs(this.linearVelocity.z) < 0.025) this.linearVelocity.z = 0;
     if (Math.abs(this.linearVelocity.x) < 0.025) this.linearVelocity.x = 0;
 
@@ -458,16 +473,24 @@ export class SensorManager {
       -this.MAX_PHYS_VEL,
       Math.min(this.MAX_PHYS_VEL, this.physicalVelocity.strafe)
     );
+    this.physicalVelocity.up = Math.max(
+      -this.MAX_PHYS_VEL,
+      Math.min(this.MAX_PHYS_VEL, this.physicalVelocity.up)
+    );
 
     // Continuous translation velocity in 6DOF space
-    this.physicalSpeedMps = Math.hypot(this.physicalVelocity.forward, this.physicalVelocity.strafe);
+    this.physicalSpeedMps = Math.hypot(
+      this.physicalVelocity.forward,
+      this.physicalVelocity.strafe,
+      this.physicalVelocity.up
+    );
   }
 
   /**
-   * Returns physical spatial translation velocity (forward/backward and strafe)
+   * Returns physical spatial translation velocity (forward/backward, strafe, up/down)
    * in the camera's local coordinate frame, filtered with deadzone and velocity dampening.
    */
-  public getPhysicalTranslationVelocity(): { forward: number; strafe: number } {
+  public getPhysicalTranslationVelocity(): { forward: number; strafe: number; up: number } {
     return this.physicalVelocity;
   }
 
