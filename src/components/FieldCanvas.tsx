@@ -125,6 +125,8 @@ const _forwardDir = new THREE.Vector3();
 const _rightDir = new THREE.Vector3();
 const _targetVel = new THREE.Vector3();
 const _camQuatInv = new THREE.Quaternion();
+const _camQuat = new THREE.Quaternion();
+const _tempEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _relPos = new THREE.Vector3();
 const _worldPos = new THREE.Vector3();
 const _proj = new THREE.Vector3();
@@ -739,50 +741,76 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         player.roll = 0;
       }
 
-      // Compute forward & right direction vectors in meadow world based on yaw using preallocated vectors
-      _forwardDir.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-      _rightDir.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+      // Update camera 3D gaze orientation in local Euler space
+      _tempEuler.set(player.pitch, player.yaw, player.roll, 'YXZ');
+      _camQuat.setFromEuler(_tempEuler);
 
-      // CONTROLS: Complete Hybrid Navigation (WASD, Virtual Joystick, and Physical Phone Movement)
-      let moveForward = 0;
-      let moveRight = 0;
-
-      // 1. Keyboard Navigation (Desktop)
-      if (keys.w) moveForward += 1;
-      if (keys.s) moveForward -= 1;
-      if (keys.d) moveRight += 1;
-      if (keys.a) moveRight -= 1;
-
-      // 2. Virtual Joystick Input (Touch Thumb on Mobile)
-      moveRight += joystickMoveRef.current.x;
-      moveForward -= joystickMoveRef.current.y;
-
-      // 3. Physical Cell Phone Movement & Tilt-to-Walk ("transitar y caminar")
-      // When holding phone, forward tilt/thrust directly walks the player through the meadow
-      const phoneTilt = sensorManager.getPhoneTiltWalk();
-      moveForward += phoneTilt.forward;
-      moveRight += phoneTilt.strafe;
-
-      const moveLen = Math.hypot(moveForward, moveRight);
-      if (moveLen > 1.0) {
-        moveForward /= moveLen;
-        moveRight /= moveLen;
+      // 1. Horizontal Forward Vector (projected onto ground plane X-Z, normalized)
+      _forwardDir.set(0, 0, -1).applyQuaternion(_camQuat);
+      _forwardDir.y = 0;
+      if (_forwardDir.lengthSq() > 0.0001) {
+        _forwardDir.normalize();
+      } else {
+        _forwardDir.set(0, 0, -1);
       }
 
-      _targetVel.set(0, 0, 0)
-        .addScaledVector(_forwardDir, moveForward * player.walkSpeed)
-        .addScaledVector(_rightDir, moveRight * player.walkSpeed);
+      // 2. Horizontal Right Vector (strictly orthogonal to horizontal forward)
+      _rightDir.set(-_forwardDir.z, 0, _forwardDir.x);
 
-      player.velocity.lerp(_targetVel, dt * 9.0);
+      // CONTROLS: Complete Hybrid Navigation with Unified Local Camera Coordinate System
+      let inputForward = 0;
+      let inputRight = 0;
+
+      // 1. Keyboard Navigation (Desktop WASD / Arrow Keys)
+      if (keys.w) inputForward += 1;
+      if (keys.s) inputForward -= 1;
+      if (keys.d) inputRight += 1;
+      if (keys.a) inputRight -= 1;
+
+      // 2. Virtual Joystick Input (Touch Thumb on Mobile)
+      const joyX = joystickMoveRef.current.x;
+      const joyY = joystickMoveRef.current.y;
+      const joyMag = Math.hypot(joyX, joyY);
+
+      if (joyMag > 0.05) {
+        // Joystick takes clean authoritative precedence when touched:
+        // Pushing UP (joyY < 0) advances strictly forward along camera view
+        // Pushing RIGHT (joyX > 0) strafes strictly right of camera view
+        inputForward += -joyY;
+        inputRight += joyX;
+      } else {
+        // 3. Physical Cell Phone Movement & Tilt-to-Walk (when not actively using touch joystick)
+        const phoneTilt = sensorManager.getPhoneTiltWalk();
+        inputForward += phoneTilt.forward;
+        inputRight += phoneTilt.strafe;
+      }
+
+      // 4. Strict Vector Normalization & Uniform Speed Calculation
+      const inputLen = Math.hypot(inputForward, inputRight);
+      if (inputLen > 0.02) {
+        const speedScale = Math.min(1.0, inputLen);
+        const normForward = (inputForward / inputLen) * speedScale;
+        const normRight = (inputRight / inputLen) * speedScale;
+
+        _targetVel.set(0, 0, 0)
+          .addScaledVector(_forwardDir, normForward * player.walkSpeed)
+          .addScaledVector(_rightDir, normRight * player.walkSpeed);
+      } else {
+        _targetVel.set(0, 0, 0);
+      }
+
+      // Smooth velocity interpolation with instant zero clamp at rest
+      player.velocity.lerp(_targetVel, dt * 10.0);
       if (player.velocity.lengthSq() < 0.0001 && _targetVel.lengthSq() === 0) {
         player.velocity.set(0, 0, 0);
       }
       player.position.addScaledVector(player.velocity, dt);
 
-      // 4. Physical Pedometer Steps / Accelerometer Direct Stride Displacement
+      // 5. Physical Stride Impulse (discrete footsteps from pedometer, without continuous noise)
       const stepDistMeters = sensorManager.consumePhysicalStepDisplacement();
-      if (stepDistMeters !== 0) {
-        player.position.addScaledVector(_forwardDir, stepDistMeters * 1.6);
+      if (Math.abs(stepDistMeters) > 0.25) {
+        const clampedStep = Math.sign(stepDistMeters) * Math.min(0.65, Math.abs(stepDistMeters));
+        player.position.addScaledVector(_forwardDir, clampedStep);
       }
 
       // Clamp player within the compact meadow perimeter (radius 18.5m)
@@ -864,12 +892,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       const curPitch = THREE.MathUtils.lerp(player.prevPitch, player.pitch, alpha);
       const curRoll = THREE.MathUtils.lerp(player.prevRoll, player.roll, alpha);
 
-      camera.rotation.set(0, 0, 0);
-      camera.rotateY(curYaw);
-      camera.rotateX(curPitch);
-      if (curRoll !== 0) {
-        camera.rotateZ(curRoll);
-      }
+      camera.rotation.order = 'YXZ';
+      camera.rotation.set(curPitch, curYaw, curRoll, 'YXZ');
 
       // Sub-frame Mosquito Visual Interpolation & 3D Spatial Audio
       _screenTargetsCount = 0;

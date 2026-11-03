@@ -422,14 +422,7 @@ export class SensorManager {
 
     // Maximum translation velocity clamp
     const maxSpeed = 1.6 * this.motionSensitivity;
-    this.linearVelocity.z = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.z));
-    this.linearVelocity.x = Math.max(-maxSpeed, Math.min(maxSpeed, this.linearVelocity.x));
-
-    const deltaDistZ = this.linearVelocity.z * dt;
-    if (deltaDistZ !== 0) {
-      this.accumulatedStepDistance += deltaDistZ;
-    }
-
+    // Continuous translation velocity in 6DOF space
     this.physicalSpeedMps = Math.hypot(this.linearVelocity.z, this.linearVelocity.x);
   }
 
