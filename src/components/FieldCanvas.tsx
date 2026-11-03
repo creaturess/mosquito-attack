@@ -730,18 +730,25 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       _forwardDir.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
       _rightDir.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
 
-      // CONTROLS: WASD + Virtual Joystick Movement (ZERO phantom auto-advance or tilt drift)
+      // CONTROLS: Complete Hybrid Navigation (WASD, Virtual Joystick, and Physical Phone Movement)
       let moveForward = 0;
       let moveRight = 0;
 
+      // 1. Keyboard Navigation (Desktop)
       if (keys.w) moveForward += 1;
       if (keys.s) moveForward -= 1;
       if (keys.d) moveRight += 1;
       if (keys.a) moveRight -= 1;
 
-      // Virtual Joystick input
+      // 2. Virtual Joystick Input (Touch Thumb on Mobile)
       moveRight += joystickMoveRef.current.x;
       moveForward -= joystickMoveRef.current.y;
+
+      // 3. Physical Cell Phone Movement & Tilt-to-Walk ("transitar y caminar")
+      // When holding phone, forward tilt/thrust directly walks the player through the meadow
+      const phoneTilt = sensorManager.getPhoneTiltWalk();
+      moveForward += phoneTilt.forward;
+      moveRight += phoneTilt.strafe;
 
       const moveLen = Math.hypot(moveForward, moveRight);
       if (moveLen > 1.0) {
@@ -755,6 +762,12 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
 
       player.velocity.lerp(_targetVel, dt * 9.0);
       player.position.addScaledVector(player.velocity, dt);
+
+      // 4. Physical Pedometer Steps / Accelerometer Direct Stride Displacement
+      const stepDistMeters = sensorManager.consumePhysicalStepDisplacement();
+      if (stepDistMeters !== 0) {
+        player.position.addScaledVector(_forwardDir, stepDistMeters * 1.6);
+      }
 
       // Clamp player within the compact meadow perimeter (radius 18.5m)
       const distFromCenter = Math.hypot(player.position.x, player.position.z);
@@ -1086,6 +1099,14 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         <span>🧭 Giroscopio (móvil) / Mouse para mirar</span>
         <span className="text-emerald-500">•</span>
         <span>⚔️ Deslizar para cortar</span>
+      </div>
+
+      {/* Mobile Walking Guidance Badge */}
+      <div
+        className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex sm:hidden items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/75 px-3 py-1 backdrop-blur-md text-[10px] font-semibold text-emerald-200 shadow-md text-center"
+        style={{ transform: 'translate3d(-50%, 0, 0)' }}
+      >
+        <span>🚶 Caminá, incliná el cel o usá el joystick para avanzar</span>
       </div>
 
       {/* Return to Menu Button */}

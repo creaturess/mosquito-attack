@@ -47,6 +47,23 @@ export interface SliceHitResult {
   swipeSpeed: number;
 }
 
+// Pre-allocated scratch instances to prevent GC pauses and eliminate camera mode lag
+const _camForward = new THREE.Vector3();
+const _relPos = new THREE.Vector3();
+const _dirToMos = new THREE.Vector3();
+const _tempVec = new THREE.Vector3();
+const _viewPos = new THREE.Vector3();
+const _lookDir = new THREE.Vector3();
+const _screenTargetsPool: MosquitoScreenTarget[] = Array.from({ length: 35 }, () => ({
+  id: '',
+  screenX: 0,
+  screenY: 0,
+  radiusPx: 0,
+  isDead: false,
+  userData: null,
+}));
+let _screenTargetsCount = 0;
+
 export class BladeSwipeDetector {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null;
@@ -625,7 +642,7 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
     });
     renderer.localClippingEnabled = true;
     renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     // Fruit Ninja Slicing and Split Halves Physics Managers
@@ -980,37 +997,38 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
 
       bladeDetector.addPoint(e.clientX, e.clientY);
 
-      // Screen-space targets for slicing
+      // Screen-space targets for slicing (Zero GC allocation)
       if (stateRef.current.isPlaying) {
-        const screenTargets: MosquitoScreenTarget[] = [];
-        const tempVec = new THREE.Vector3();
+        _screenTargetsCount = 0;
 
-        for (const mos of mosquitoes) {
+        for (let i = 0; i < mosquitoes.length; i++) {
+          const mos = mosquitoes[i];
           if (mos.isDead) continue;
-          tempVec.setFromMatrixPosition(mos.group.matrixWorld);
+          _tempVec.setFromMatrixPosition(mos.group.matrixWorld);
 
-          const viewPos = tempVec.clone().applyMatrix4(camera.matrixWorldInverse);
-          if (viewPos.z >= -0.15) continue;
+          _viewPos.copy(_tempVec).applyMatrix4(camera.matrixWorldInverse);
+          if (_viewPos.z >= -0.15) continue;
 
-          tempVec.project(camera);
-          if (tempVec.z > 1.0 || tempVec.z < -1.0) continue;
+          _tempVec.project(camera);
+          if (_tempVec.z > 1.0 || _tempVec.z < -1.0) continue;
 
-          const screenX = ((tempVec.x + 1) * window.innerWidth) / 2;
-          const screenY = ((-tempVec.y + 1) * window.innerHeight) / 2;
+          const screenX = ((_tempVec.x + 1) * window.innerWidth) * 0.5;
+          const screenY = ((-_tempVec.y + 1) * window.innerHeight) * 0.5;
 
-          screenTargets.push({
-            id: mos.id,
-            screenX,
-            screenY,
-            radiusPx: mos.isBoss ? 150 : 75,
-            isDead: mos.isDead,
-            userData: mos,
-          });
+          if (_screenTargetsCount < _screenTargetsPool.length) {
+            const t = _screenTargetsPool[_screenTargetsCount++];
+            t.id = mos.id;
+            t.screenX = screenX;
+            t.screenY = screenY;
+            t.radiusPx = mos.isBoss ? 150 : 75;
+            t.isDead = mos.isDead;
+            t.userData = mos;
+          }
         }
 
-        const hits = bladeDetector.checkIntersections(screenTargets);
-        for (const hit of hits) {
-          handleSliceHit(hit);
+        const hits = bladeDetector.checkIntersections(_screenTargetsPool, _screenTargetsCount);
+        for (let h = 0; h < hits.length; h++) {
+          handleSliceHit(hits[h]);
         }
       }
 
@@ -1087,7 +1105,7 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       bladeDetector.resize(width, height);
     };
     window.addEventListener('resize', handleResize);
@@ -1131,7 +1149,7 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
       camera.position.set(position.x, position.y, position.z);
       camera.updateMatrixWorld();
 
-      const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+      _camForward.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
 
       if (stateRef.current.isPlaying) {
         // --- Boss scream mechanic in Level 3 ---
@@ -1140,8 +1158,8 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
             accumulatedScreamTime += delta;
             onScreamProgressRef.current(accumulatedScreamTime);
 
-            const lookDir = camForward.clone();
-            particles.triggerShockwave(camera.position, lookDir);
+            _lookDir.copy(_camForward);
+            particles.triggerShockwave(camera.position, _lookDir);
             buzzManager.playBossHurtSfx();
             sensorManager.triggerHaptic('bossHit');
 
@@ -1179,7 +1197,7 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
               audio.volume,
               cameraMatrixInverse,
               camera.aspect,
-              camForward
+              _camForward
             );
 
             const respawnDelayMs = mos.level === 2 ? 1200 : 1800;
@@ -1194,13 +1212,13 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
               audio.volume,
               cameraMatrixInverse,
               camera.aspect,
-              camForward,
+              _camForward,
               mosquitoes
             );
 
-            // Calculate spatial audio position relative to camera view
-            const relPos = mos.group.position.clone().applyMatrix4(cameraMatrixInverse);
-            const dist = relPos.length();
+            // Calculate spatial audio position relative to camera view using scratch vector
+            _relPos.copy(mos.group.position).applyMatrix4(cameraMatrixInverse);
+            const dist = _relPos.length();
             const speedRatio = mos.currentSpeed / (mos.baseSpeed || 0.35);
 
             // Buzzing audio update for all mosquitoes, including Boss with menacing vibration
@@ -1211,9 +1229,9 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
               const speedFactor = stateRef.current.currentLevel === 2 ? 1.35 : 1.0;
               buzzManager.updateMosquitoBuzz(
                 mos.id,
-                relPos.x,
-                relPos.y,
-                relPos.z,
+                _relPos.x,
+                _relPos.y,
+                _relPos.z,
                 false,
                 speedFactor,
                 speedRatio
@@ -1225,12 +1243,12 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
 
             if (dist < minDistance) {
               minDistance = dist;
-              closestRelPos = relPos;
+              closestRelPos = _relPos;
             }
 
             // Aiming detection: check if camera aims near mosquito
-            const dirToMos = mos.group.position.clone().sub(cameraPos).normalize();
-            const dot = camForward.dot(dirToMos);
+            _dirToMos.copy(mos.group.position).sub(cameraPos).normalize();
+            const dot = _camForward.dot(_dirToMos);
             if (dot > targetConeDot && dist < 8.8) {
               isAimingNear = true;
             }

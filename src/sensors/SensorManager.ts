@@ -179,15 +179,22 @@ export class SensorManager {
     }
   }
 
-  private startMotionListeners() {
-    if (this.listenersAttached) return;
-    this.listenersAttached = true;
+  public startMotionListeners() {
+    if (typeof window === 'undefined') return;
+    try {
+      window.removeEventListener('deviceorientation', this.handleDeviceOrientation, true);
+      window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
+      window.removeEventListener('devicemotion', this.handleDeviceMotion, true);
 
-    window.addEventListener('deviceorientation', this.handleDeviceOrientation, true);
-    // Many Android phones (Pixel, Samsung, Xiaomi) fire deviceorientationabsolute with full 3D angles
-    window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
-    window.addEventListener('devicemotion', this.handleDeviceMotion, true);
-    this.status.gyroscopeActive = true;
+      window.addEventListener('deviceorientation', this.handleDeviceOrientation, true);
+      // Many Android phones (Pixel, Samsung, Xiaomi) fire deviceorientationabsolute with full 3D angles
+      window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
+      window.addEventListener('devicemotion', this.handleDeviceMotion, true);
+      this.listenersAttached = true;
+      this.status.gyroscopeActive = true;
+    } catch (e) {
+      console.warn('startMotionListeners error:', e);
+    }
   }
 
   private handleDeviceOrientationAbsolute(event: DeviceOrientationEvent) {
@@ -274,6 +281,7 @@ export class SensorManager {
   private isStepPeaking: boolean = false;
   public stepCount: number = 0;
   public physicalSpeedMps: number = 0;
+  private accumulatedStepDistance: number = 0;
 
   /**
    * DeviceMotion handler: calculates physical forward, backward, and lateral displacement
@@ -350,6 +358,7 @@ export class SensorManager {
         // Stride displacement: step forward or backward in room
         const isRetreating = rawForwardAcc < -0.2;
         const strideMeters = (isRetreating ? -0.55 : 0.65) * this.motionSensitivity;
+        this.accumulatedStepDistance += strideMeters;
         this.moveForward(strideMeters);
         this.triggerHaptic('step');
       }
@@ -406,10 +415,51 @@ export class SensorManager {
       this.targetPosition.x += forwardDirX * deltaDistZ + rightDirX * deltaDistX;
       this.targetPosition.z += forwardDirZ * deltaDistZ + rightDirZ * deltaDistX;
       this.targetPosition.forwardDistance += deltaDistZ;
+      this.accumulatedStepDistance += deltaDistZ;
       this.clampTargetPosition();
     }
 
     this.physicalSpeedMps = Math.hypot(this.linearVelocity.z, this.linearVelocity.x);
+  }
+
+  /**
+   * Consume accumulated physical step/thrust displacement (meters) for external 3D spaces
+   */
+  public consumePhysicalStepDisplacement(): number {
+    const dist = this.accumulatedStepDistance;
+    this.accumulatedStepDistance = 0;
+    return dist;
+  }
+
+  /**
+   * Translates intentional phone forward/backward tilt into fluid walking speed (-1.0 to 1.0)
+   * Designed specifically for intuitive phone walking in MODO CAMPO:
+   * - Holding phone at resting angle (~55°-65°): standstill, zero drift
+   * - Dipping phone slightly forward (> 8° from resting): walk forward smoothly
+   * - Tilting phone slightly backward (> 14° from resting): back up slowly
+   * - Tilting phone sideways (> 10°): strafe left/right
+   */
+  public getPhoneTiltWalk(): { forward: number; strafe: number } {
+    if (!this.hasReceivedGyroData) return { forward: 0, strafe: 0 };
+
+    const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
+    let forward = 0;
+    // Deadband of 8 degrees to allow looking around without walking
+    if (deltaBeta < -8) {
+      // Forward tilt walks forward (up to 1.0 intensity)
+      forward = Math.min(1.0, (-deltaBeta - 8) / 18);
+    } else if (deltaBeta > 14) {
+      // Backward tilt backs up gently
+      forward = Math.max(-0.6, -(deltaBeta - 14) / 20);
+    }
+
+    const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
+    let strafe = 0;
+    if (Math.abs(deltaGamma) > 10) {
+      strafe = Math.min(0.7, Math.max(-0.7, Math.sign(deltaGamma) * (Math.abs(deltaGamma) - 10) / 20));
+    }
+
+    return { forward, strafe };
   }
 
   public getYawRad(): number {
