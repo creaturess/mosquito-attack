@@ -149,15 +149,13 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   onScreamProgressRef.current = onScreamProgress;
 
   // Touch virtual joystick state for mobile
-  const [touchActive, setTouchActive] = useState(false);
+  const [, setTouchActive] = useState(false);
   const [joystickThumb, setJoystickThumb] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const joystickCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const joystickTouchIdRef = useRef<number | null>(null);
-  const lookTouchIdRef = useRef<number | null>(null);
-  const lastLookPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const joystickMoveRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Manual look rotation offsets (mouse or touch swipe)
+  // Manual look rotation offsets (mouse look on desktop)
   const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
 
   useEffect(() => {
@@ -541,14 +539,10 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
 
-    // --- 10. Mobile Touch Look & Fruit Ninja Swipe Handling ---
+    // --- 10. Fruit Ninja Blade Swipe Handling (Swiping ONLY cuts mosquitoes, never moves the stage) ---
     const handleTouchStart = (e: TouchEvent) => {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        if (touch.clientX > window.innerWidth * 0.4 && lookTouchIdRef.current === null) {
-          lookTouchIdRef.current = touch.identifier;
-          lastLookPosRef.current = { x: touch.clientX, y: touch.clientY };
-        }
         bladeDetector.addPoint(touch.clientX, touch.clientY);
       }
     };
@@ -556,26 +550,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     const handleTouchMove = (e: TouchEvent) => {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        if (touch.identifier === lookTouchIdRef.current) {
-          const dx = touch.clientX - lastLookPosRef.current.x;
-          const dy = touch.clientY - lastLookPosRef.current.y;
-          lastLookPosRef.current = { x: touch.clientX, y: touch.clientY };
-
-          manualLookRef.current.yaw -= dx * 0.0045;
-          manualLookRef.current.pitch -= dy * 0.0045;
-          manualLookRef.current.pitch = Math.max(-1.3, Math.min(1.3, manualLookRef.current.pitch));
-        }
         bladeDetector.addPoint(touch.clientX, touch.clientY);
       }
     };
 
-    const handleTouchEnd = (e: TouchEvent) => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const touch = e.changedTouches[i];
-        if (touch.identifier === lookTouchIdRef.current) {
-          lookTouchIdRef.current = null;
-        }
-      }
+    const handleTouchEnd = () => {
       bladeDetector.endStroke();
     };
 
@@ -652,8 +631,9 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
 
       // GYROSCOPE ORIENTATION:
       // If gyroscope is active, track physical phone rotation 1:1!
+      // Invert yaw so turning camera to the right turns the 3D world to the right
       if (status.gyroscopeActive) {
-        player.yaw = orientation.yawRad + manualLookRef.current.yaw;
+        player.yaw = -orientation.yawRad + manualLookRef.current.yaw;
         player.pitch = orientation.pitchRad + manualLookRef.current.pitch;
         player.roll = orientation.rollRad;
       } else {
