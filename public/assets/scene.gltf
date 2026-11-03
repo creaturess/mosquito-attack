@@ -1,0 +1,496 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 594,
+      "max": [
+        11.050140380859375,
+        0.7377910017967224,
+        6.765192985534668
+      ],
+      "min": [
+        -11.050140380859375,
+        0.7377910017967224,
+        1.341439962387085
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 7128,
+      "componentType": 5126,
+      "count": 594,
+      "max": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "min": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 594,
+      "max": [
+        0.9135479927062988,
+        0.0,
+        -0.40672653913497925,
+        1.0
+      ],
+      "min": [
+        -0.9135499596595764,
+        0.0,
+        -0.4068630039691925,
+        1.0
+      ],
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 594,
+      "max": [
+        0.9990239143371582,
+        0.9996740221977234
+      ],
+      "min": [
+        0.00032599997939541936,
+        0.35027408599853516
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 3072,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 14256,
+      "componentType": 5126,
+      "count": 63957,
+      "max": [
+        9.693154335021973,
+        2.36318302154541,
+        10.278459548950195
+      ],
+      "min": [
+        -9.693155288696289,
+        -7.3449811935424805,
+        -7.445232391357422
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 781740,
+      "componentType": 5126,
+      "count": 63957,
+      "max": [
+        0.9999585151672363,
+        1.0,
+        0.999999463558197
+      ],
+      "min": [
+        -0.9999695420265198,
+        -0.9999994039535522,
+        -0.999991774559021
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 3,
+      "byteOffset": 9504,
+      "componentType": 5126,
+      "count": 63957,
+      "max": [
+        1.0,
+        0.9999894499778748,
+        0.9999828338623047,
+        1.0
+      ],
+      "min": [
+        -1.0,
+        -0.9999358057975769,
+        -0.9999056458473206,
+        -1.0
+      ],
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 4752,
+      "componentType": 5126,
+      "count": 63957,
+      "max": [
+        0.9980400204658508,
+        0.9964200258255005
+      ],
+      "min": [
+        0.0019499999471008778,
+        0.007070064544677734
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 12288,
+      "componentType": 5125,
+      "count": 352344,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "rayray (https://sketchfab.com/rayray_sss)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/mosquito-vfx-d3d2216cddf54236bc4e138c3561c3b5",
+      "title": "Mosquito VFX"
+    },
+    "generator": "Sketchfab-15.27.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 1421664,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 516408,
+      "byteOffset": 1421664,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 1549224,
+      "byteOffset": 1938072,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 1032816,
+      "byteOffset": 3487296,
+      "byteStride": 16,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 4520112,
+      "uri": "scene.bin"
+    }
+  ],
+  "extensionsRequired": [
+    "KHR_materials_pbrSpecularGlossiness"
+  ],
+  "extensionsUsed": [
+    "KHR_materials_pbrSpecularGlossiness"
+  ],
+  "images": [
+    {
+      "uri": "textures/Default__0_diffuse.png"
+    },
+    {
+      "uri": "textures/Default__0_specularGlossiness.png"
+    },
+    {
+      "uri": "textures/Default__0_normal.png"
+    },
+    {
+      "uri": "textures/Default__0_occlusion.png"
+    },
+    {
+      "uri": "textures/default_diffuse.png"
+    },
+    {
+      "uri": "textures/default_specularGlossiness.png"
+    },
+    {
+      "uri": "textures/default_normal.png"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "extensions": {
+        "KHR_materials_pbrSpecularGlossiness": {
+          "diffuseFactor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "diffuseTexture": {
+            "index": 0
+          },
+          "glossinessFactor": 1.0,
+          "specularFactor": [
+            0.3459058160939157,
+            0.3459058160939157,
+            0.3459058160939157
+          ],
+          "specularGlossinessTexture": {
+            "index": 1
+          }
+        }
+      },
+      "name": "Default__0",
+      "normalTexture": {
+        "index": 2
+      },
+      "occlusionTexture": {
+        "index": 3
+      }
+    },
+    {
+      "alphaCutoff": 1.0,
+      "alphaMode": "MASK",
+      "doubleSided": true,
+      "extensions": {
+        "KHR_materials_pbrSpecularGlossiness": {
+          "diffuseFactor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "diffuseTexture": {
+            "index": 4
+          },
+          "glossinessFactor": 1.0,
+          "specularFactor": [
+            0.3702868427789494,
+            0.3702868427789494,
+            0.3702868427789494
+          ],
+          "specularGlossinessTexture": {
+            "index": 5
+          }
+        }
+      },
+      "name": "default",
+      "normalTexture": {
+        "index": 6
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Plane_default_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3
+          },
+          "indices": 4,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Default__0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 6,
+            "POSITION": 5,
+            "TANGENT": 7,
+            "TEXCOORD_0": 8
+          },
+          "indices": 9,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2
+      ],
+      "matrix": [
+        0.009999999776482582,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.009999999776482582,
+        0.0,
+        0.0,
+        -0.009999999776482582,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Mosquito.fbx"
+    },
+    {
+      "children": [
+        3,
+        5,
+        7
+      ],
+      "name": "RootNode"
+    },
+    {
+      "children": [
+        4
+      ],
+      "matrix": [
+        0.6001821379990065,
+        -0.3559540326020452,
+        0.7162947213970543,
+        0.0,
+        0.2286104442061601,
+        0.9345034653088998,
+        0.27283793380965193,
+        0.0,
+        -0.7664976621143758,
+        -1.3877787807814457e-16,
+        0.6422470972867035,
+        0.0,
+        -17.36823844909668,
+        8.045649528503418,
+        -19.594696044921875,
+        1.0
+      ],
+      "name": "CINEMA_4D_Editor"
+    },
+    {
+      "name": "Object_4"
+    },
+    {
+      "children": [
+        6
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -0.12619951367378235,
+        0.0,
+        1.0
+      ],
+      "name": "Plane"
+    },
+    {
+      "mesh": 0,
+      "name": "Plane_default_0"
+    },
+    {
+      "children": [
+        8
+      ],
+      "name": "Default"
+    },
+    {
+      "mesh": 1,
+      "name": "Default__0"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    },
+    {
+      "sampler": 0,
+      "source": 3
+    },
+    {
+      "sampler": 0,
+      "source": 4
+    },
+    {
+      "sampler": 0,
+      "source": 5
+    },
+    {
+      "sampler": 0,
+      "source": 6
+    }
+  ]
+}
