@@ -84,20 +84,21 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
     setIsRequesting(true);
     setRequestStatusText('Iniciando giroscopio, movimiento y audio...');
 
-    try {
-      buzzManager.init();
-    } catch (e) {
-      console.warn('AudioContext init error:', e);
-    }
-
-    // Gyroscope & Motion permissions (CRITICAL: must be requested directly in this user tap event!)
+    // 1. Gyroscope & Motion permissions (CRITICAL: requested FIRST in the user tap event for iOS Safari)
     try {
       await sensorManager.requestGyroscope();
     } catch (e) {
       console.warn('Gyroscope request error in field mode:', e);
     }
 
-    // Request microphone for Level 3 boss scream
+    // 2. AudioContext
+    try {
+      buzzManager.init();
+    } catch (e) {
+      console.warn('AudioContext init error:', e);
+    }
+
+    // 3. Request microphone for Level 3 boss scream
     try {
       const audioCtx = buzzManager.getAudioContext() || undefined;
       sensorManager.requestMicrophone(audioCtx).catch(() => false);

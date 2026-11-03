@@ -122,6 +122,8 @@ export class BladeSwipeDetector {
     return hits;
   }
 
+  private hasDrawn: boolean = false;
+
   public render() {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -129,6 +131,15 @@ export class BladeSwipeDetector {
 
     this.points = this.points.filter((pt) => now - pt.time <= this.trailLifetimeMs);
 
+    if (this.points.length === 0) {
+      if (this.hasDrawn) {
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.hasDrawn = false;
+      }
+      return;
+    }
+
+    this.hasDrawn = true;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.points.length < 2) return;
 

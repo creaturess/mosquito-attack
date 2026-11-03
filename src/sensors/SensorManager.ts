@@ -109,34 +109,49 @@ export class SensorManager {
   }
 
   /**
+   * Check whether real gyroscope data is actively being received from the device
+   */
+  public hasGyroData(): boolean {
+    return this.hasReceivedGyroData;
+  }
+
+  /**
    * Request Gyroscope and Accelerometer permissions (required on iOS 13+) and attach listeners
    */
   public async requestGyroscope(): Promise<boolean> {
     try {
       // Check if iOS DeviceOrientationEvent.requestPermission exists
-      const DeviceOrientation = window.DeviceOrientationEvent as unknown as {
-        requestPermission?: () => Promise<'granted' | 'denied'>;
+      const win = window as unknown as {
+        DeviceOrientationEvent?: {
+          requestPermission?: () => Promise<'granted' | 'denied'>;
+        };
+        DeviceMotionEvent?: {
+          requestPermission?: () => Promise<'granted' | 'denied'>;
+        };
       };
 
-      if (typeof DeviceOrientation?.requestPermission === 'function') {
-        const response = await DeviceOrientation.requestPermission();
-        if (response === 'granted') {
-          this.status.gyroscopeAllowed = true;
-        } else {
-          this.status.gyroscopeAllowed = false;
-          return false;
+      if (typeof win.DeviceOrientationEvent?.requestPermission === 'function') {
+        try {
+          const response = await win.DeviceOrientationEvent.requestPermission();
+          if (response === 'granted') {
+            this.status.gyroscopeAllowed = true;
+            this.status.gyroscopeActive = true;
+          } else {
+            this.status.gyroscopeAllowed = false;
+            this.status.gyroscopeActive = false;
+            return false;
+          }
+        } catch (permErr) {
+          console.warn('DeviceOrientationEvent.requestPermission prompt error:', permErr);
         }
       } else {
         this.status.gyroscopeAllowed = true;
       }
 
       // Check if iOS DeviceMotionEvent.requestPermission exists
-      const DeviceMotion = window.DeviceMotionEvent as unknown as {
-        requestPermission?: () => Promise<'granted' | 'denied'>;
-      };
-      if (typeof DeviceMotion?.requestPermission === 'function') {
+      if (typeof win.DeviceMotionEvent?.requestPermission === 'function') {
         try {
-          await DeviceMotion.requestPermission();
+          await win.DeviceMotionEvent.requestPermission();
         } catch {
           // ignore if already granted or failed
         }
@@ -716,42 +731,8 @@ export class SensorManager {
       const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
       rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
 
-      // 2. Natural physical tilt to walk & explore the room:
-      // Tilting top of phone forward into the room advances forward in the direction aimed.
-      // Tilting top of phone backward steps backward. Tilting sideways strafes.
-      const forwardTiltDeg = (this.calibratedBeta || 65) - this.smoothedOrientation.beta;
-      const dtFrame = 0.016;
-      const forwardDirX = -Math.sin(yawRad);
-      const forwardDirZ = -Math.cos(yawRad);
-      const rightDirX = Math.cos(yawRad);
-      const rightDirZ = -Math.sin(yawRad);
-
-      if (forwardTiltDeg > 5) {
-        // Walk forward in gaze direction
-        const forwardSpeed = Math.min(2.8, (forwardTiltDeg - 5) * 0.16) * this.motionSensitivity;
-        const forwardDisp = forwardSpeed * dtFrame;
-        this.targetPosition.x += forwardDirX * forwardDisp;
-        this.targetPosition.z += forwardDirZ * forwardDisp;
-        this.targetPosition.forwardDistance += forwardDisp;
-        this.clampTargetPosition();
-      } else if (forwardTiltDeg < -6) {
-        // Step backward
-        const retreatSpeed = Math.max(-2.2, (forwardTiltDeg + 6) * 0.14) * this.motionSensitivity;
-        const retreatDisp = retreatSpeed * dtFrame;
-        this.targetPosition.x += forwardDirX * retreatDisp;
-        this.targetPosition.z += forwardDirZ * retreatDisp;
-        this.targetPosition.forwardDistance += retreatDisp;
-        this.clampTargetPosition();
-      }
-
-      // Roll tilt: tilting phone sideways strafes left or right
-      if (Math.abs(deltaGamma) > 7) {
-        const strafeSpeed = Math.sign(deltaGamma) * Math.min(2.2, (Math.abs(deltaGamma) - 7) * 0.14) * this.motionSensitivity;
-        const strafeDisp = strafeSpeed * dtFrame;
-        this.targetPosition.x += rightDirX * strafeDisp;
-        this.targetPosition.z += rightDirZ * strafeDisp;
-        this.clampTargetPosition();
-      }
+      // Note: Automatic tilt-to-walk simulation removed to prevent unwanted phantom camera displacement in the prairie.
+      // Physical movement is strictly commanded by intentional user controls.
     } else {
       yawRad = this.manualEuler.yaw;
       pitchRad = this.manualEuler.pitch;

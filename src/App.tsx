@@ -83,26 +83,10 @@ export default function App() {
     setIsDebugMode((prev) => !prev);
   }, []);
 
-  // Poll sensor volume, spatial position and status for UI HUD
-  useEffect(() => {
-    let animId: number;
-    let frameCounter = 0;
-
-    const checkSensors = () => {
-      animId = requestAnimationFrame(checkSensors);
-      frameCounter++;
-      if (frameCounter % 3 === 0) {
-        const { audio, status, position } = sensorManager.getSnapshot();
-        setCurrentVolume(audio.volume);
-        setIsScreaming(audio.isScreaming);
-        setSensorStatus(status);
-        setForwardDistance(position.forwardDistance);
-      }
-    };
-
-    animId = requestAnimationFrame(checkSensors);
-    return () => cancelAnimationFrame(animId);
-  }, []);
+  const handleNearestMosquitoUpdate = useCallback((_info: unknown) => {}, []);
+  const handleProximityHeatUpdate = useCallback((_heat: number, _aiming: boolean) => {}, []);
+  const handleEdgeIndicatorUpdate = useCallback((_edge: unknown) => {}, []);
+  const handleDebugUpdate = useCallback((_nests: unknown) => {}, []);
 
   // Bind cameraStream to persistent video element
   useEffect(() => {
@@ -319,15 +303,12 @@ export default function App() {
             onScreamProgress={handleScreamProgress}
             isARMode={gameState.isARMode}
             videoElement={null}
-            onNearestMosquitoUpdate={setNearestMosquito}
+            onNearestMosquitoUpdate={handleNearestMosquitoUpdate}
             isDebugMode={isDebugMode}
             onToggleDebug={handleToggleDebug}
-            onDebugUpdate={setDebugNests}
-            onProximityHeatUpdate={(heat, aiming) => {
-              setProximityHeat(heat);
-              setIsAimingNear(aiming);
-            }}
-            onEdgeIndicatorUpdate={setEdgeIndicator}
+            onDebugUpdate={handleDebugUpdate}
+            onProximityHeatUpdate={handleProximityHeatUpdate}
+            onEdgeIndicatorUpdate={handleEdgeIndicatorUpdate}
           />
         </>
       )}

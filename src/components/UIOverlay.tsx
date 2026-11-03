@@ -34,7 +34,7 @@ interface UIOverlayProps {
   debugNests?: unknown;
 }
 
-export const UIOverlay: React.FC<UIOverlayProps> = ({
+export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
   gameState,
 }) => {
 
@@ -101,4 +101,5 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
     </div>
   );
-};
+});
+UIOverlay.displayName = 'UIOverlay';

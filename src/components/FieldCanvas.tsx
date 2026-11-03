@@ -120,6 +120,16 @@ function createCurvedGrassTuftGeometry(bladeCount: number = 7): THREE.BufferGeom
   return geom;
 }
 
+// Pre-allocated scratch instances to avoid per-frame GC allocations and stutter
+const _forwardDir = new THREE.Vector3();
+const _rightDir = new THREE.Vector3();
+const _targetVel = new THREE.Vector3();
+const _camQuatInv = new THREE.Quaternion();
+const _relPos = new THREE.Vector3();
+const _worldPos = new THREE.Vector3();
+const _proj = new THREE.Vector3();
+const _sliceScale = new THREE.Vector3();
+
 export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   gameState,
   onKill,
@@ -155,8 +165,35 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
   const joystickTouchIdRef = useRef<number | null>(null);
   const joystickMoveRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Manual look rotation offsets (mouse look on desktop)
+  // Manual look rotation offsets (mouse look on desktop only)
   const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
+
+  // Explicit Mobile Gyroscope status & prompt
+  const [showGyroPrompt, setShowGyroPrompt] = useState(false);
+  const [isGyroActive, setIsGyroActive] = useState(false);
+
+  useEffect(() => {
+    // Check if iOS Safari requires explicit permission prompt
+    if (typeof window !== 'undefined') {
+      const win = window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } };
+      if (typeof win.DeviceOrientationEvent?.requestPermission === 'function' && !sensorManager.hasGyroData()) {
+        setShowGyroPrompt(true);
+      }
+    }
+  }, []);
+
+  const handleRequestGyroExplicit = async () => {
+    const granted = await sensorManager.requestGyroscope();
+    if (granted) {
+      setShowGyroPrompt(false);
+      setIsGyroActive(true);
+    }
+  };
+
+  const handleCalibrateCenter = () => {
+    sensorManager.calibrateCenter();
+    manualLookRef.current = { yaw: 0, pitch: 0 };
+  };
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current || !bladeCanvasRef.current) return;
@@ -179,11 +216,15 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       canvas: canvasRef.current,
       antialias: true,
       powerPreference: 'high-performance',
+      alpha: false,
+      depth: true,
+      stencil: false,
+      preserveDrawingBuffer: false,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -314,6 +355,26 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       metalness: 0.04,
       side: THREE.DoubleSide,
     });
+
+    // GPU-driven vertex wind sway without CPU buffer uploads (silky smooth, zero pipeline stalls)
+    grassMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.vertexShader = `
+        uniform float uTime;
+        ${shader.vertexShader}
+      `;
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `
+        #include <begin_vertex>
+        float sway = sin(uTime * 2.2 + position.x * 0.4 + position.z * 0.4) * uv.y * uv.y * 0.12;
+        transformed.x += sway;
+        transformed.z += sway * 0.4;
+        `
+      );
+      grassMat.userData.shader = shader;
+    };
+
     const grassInstanced = new THREE.InstancedMesh(curvedGrassGeom, grassMat, tuftCount);
     grassInstanced.receiveShadow = true;
 
@@ -608,11 +669,6 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       spawnFieldMosquito();
     }
 
-    // Previous forward distance tracker for physical phone translation
-    let prevSensorFwd = 0;
-    let prevSensorX = 0;
-    let prevSensorZ = 0;
-
     // --- 12. Main Animation Loop ---
     let animFrameId: number;
     let lastTime = performance.now();
@@ -625,50 +681,31 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       const delta = Math.min((now - lastTime) / 1000, 0.08);
       lastTime = now;
 
-      // 1. Update SensorManager (GYROSCOPE & PHYSICAL PHONE TRANSLATION)
+      // 1. Update SensorManager (DeviceOrientationEvent & Audio)
       const sensorData = sensorManager.update();
-      const { orientation, position: sensorPos, status } = sensorData;
+      const { orientation, status } = sensorData;
+
+      const hasGyro = sensorManager.hasGyroData() || status.gyroscopeActive;
 
       // GYROSCOPE ORIENTATION:
-      // If gyroscope is active, track physical phone rotation 1:1!
+      // Camera orientation depends strictly and exclusively on DeviceOrientationEvent
       // Invert yaw so turning camera to the right turns the 3D world to the right
-      if (status.gyroscopeActive) {
-        player.yaw = -orientation.yawRad + manualLookRef.current.yaw;
-        player.pitch = orientation.pitchRad + manualLookRef.current.pitch;
+      if (hasGyro) {
+        player.yaw = -orientation.yawRad;
+        player.pitch = orientation.pitchRad;
         player.roll = orientation.rollRad;
       } else {
+        // Desktop PC fallback when no gyroscope hardware is detected
         player.yaw = manualLookRef.current.yaw;
         player.pitch = manualLookRef.current.pitch;
         player.roll = 0;
       }
 
-      // Compute forward & right direction vectors in meadow world based on yaw
-      const forwardDir = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-      const rightDir = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+      // Compute forward & right direction vectors in meadow world based on yaw using preallocated vectors
+      _forwardDir.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+      _rightDir.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
 
-      // PHYSICAL PHONE ADVANCE / MOVEMENT ("Mover el teléfono y avanzar")
-      // Integrate physical forward steps / phone thrust displacement
-      const deltaSensorFwd = sensorPos.forwardDistance - prevSensorFwd;
-      prevSensorFwd = sensorPos.forwardDistance;
-
-      const deltaSensorX = sensorPos.x - prevSensorX;
-      prevSensorX = sensorPos.x;
-
-      const deltaSensorZ = sensorPos.z - prevSensorZ;
-      prevSensorZ = sensorPos.z;
-
-      // If user physically stepped/moved the phone forward, translate in meadow:
-      if (Math.abs(deltaSensorFwd) > 0.001) {
-        player.position.addScaledVector(forwardDir, deltaSensorFwd * 1.5);
-      }
-      if (Math.abs(deltaSensorX) > 0.001) {
-        player.position.addScaledVector(rightDir, deltaSensorX * 1.2);
-      }
-      if (Math.abs(deltaSensorZ) > 0.001) {
-        player.position.addScaledVector(forwardDir, deltaSensorZ * 1.2);
-      }
-
-      // CONTROLS: WASD + Virtual Joystick Movement
+      // CONTROLS: WASD + Virtual Joystick Movement (ZERO phantom auto-advance or tilt drift)
       let moveForward = 0;
       let moveRight = 0;
 
@@ -687,11 +724,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         moveRight /= moveLen;
       }
 
-      const targetVel = new THREE.Vector3()
-        .addScaledVector(forwardDir, moveForward * player.walkSpeed)
-        .addScaledVector(rightDir, moveRight * player.walkSpeed);
+      _targetVel.set(0, 0, 0)
+        .addScaledVector(_forwardDir, moveForward * player.walkSpeed)
+        .addScaledVector(_rightDir, moveRight * player.walkSpeed);
 
-      player.velocity.lerp(targetVel, delta * 9.0);
+      player.velocity.lerp(_targetVel, delta * 9.0);
       player.position.addScaledVector(player.velocity, delta);
 
       // Clamp player within the compact meadow perimeter (radius 18.5m)
@@ -749,34 +786,33 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
 
       // 4. Update Mosquitos & 3D Spatial Audio
       const screenTargets: MosquitoScreenTarget[] = [];
-      const camQuatInv = camera.quaternion.clone().invert();
+      _camQuatInv.copy(camera.quaternion).invert();
 
       for (let i = mosquitoes.length - 1; i >= 0; i--) {
         const mosq = mosquitoes[i];
         mosq.update(delta, player.position, getTerrainHeight);
 
-        // Calculate 3D Positional Audio relative to player camera
-        const relPos = mosq.group.position.clone().sub(camera.position);
-        relPos.applyQuaternion(camQuatInv);
+        // Calculate 3D Positional Audio relative to player camera using scratch vector
+        _relPos.copy(mosq.group.position).sub(camera.position).applyQuaternion(_camQuatInv);
 
         // Loud, clear 3D buzzing
         buzzManager.updateMosquitoBuzz(
           mosq.id,
-          relPos.x,
-          relPos.y,
-          relPos.z,
+          _relPos.x,
+          _relPos.y,
+          _relPos.z,
           mosq.isBoss,
           mosq.currentSpeed / mosq.baseSpeed
         );
 
         // Project mosquito to screen coordinates for Fruit Ninja slicing
-        const worldPos = mosq.group.position.clone();
-        const proj = worldPos.clone().project(camera);
+        _worldPos.copy(mosq.group.position);
+        _proj.copy(_worldPos).project(camera);
 
-        if (proj.z <= 1.0) {
-          const screenX = ((proj.x + 1) * width) / 2;
-          const screenY = ((-proj.y + 1) * height) / 2;
-          const distToCam = worldPos.distanceTo(camera.position);
+        if (_proj.z <= 1.0) {
+          const screenX = ((_proj.x + 1) * width) / 2;
+          const screenY = ((-_proj.y + 1) * height) / 2;
+          const distToCam = _worldPos.distanceTo(camera.position);
           const screenRadius = Math.max(45, Math.min(200, (width * (mosq.isBoss ? 1.5 : 0.55)) / Math.max(1, distToCam)));
 
           screenTargets.push({
@@ -797,10 +833,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         if (targetMosq && !targetMosq.isDead && !targetMosq.isBoss) {
           targetMosq.isDead = true;
 
+          _sliceScale.setScalar(targetMosq.baseScale);
           sliceManager.spawnSlicedHalves(
             targetMosq.group.position,
             targetMosq.group.quaternion,
-            new THREE.Vector3(targetMosq.baseScale, targetMosq.baseScale, targetMosq.baseScale),
+            _sliceScale,
             false,
             { p1: hit.p1, p2: hit.p2, swipeSpeed: hit.swipeSpeed }
           );
@@ -829,23 +866,10 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       sliceManager.update(delta);
       bladeDetector.render();
 
-      // 7. Grass Wind Sway Animation
-      const timeSec = now * 0.001;
-      const windSampleCount = Math.min(60, tuftCount);
-      // Sample wind wave across a subset each frame for buttery-smooth performance
-      for (let w = 0; w < windSampleCount; w++) {
-        const idx = (Math.floor(timeSec * 30) + w * 28) % tuftCount;
-        const tuft = tuftBasePositions[idx];
-        if (!tuft) continue;
-
-        const wave = Math.sin(timeSec * 2.8 + tuft.x * 0.35 + tuft.z * 0.35) * 0.14;
-        dummy.position.set(tuft.x, tuft.y, tuft.z);
-        dummy.rotation.set(wave * 0.5, tuft.rotY + wave * 0.3, wave);
-        dummy.scale.set(tuft.scale, tuft.scale, tuft.scale);
-        dummy.updateMatrix();
-        grassInstanced.setMatrixAt(idx, dummy.matrix);
+      // 7. GPU Grass Wind Sway Animation (Zero buffer re-upload, zero GPU stall)
+      if (grassMat.userData.shader?.uniforms?.uTime) {
+        grassMat.userData.shader.uniforms.uTime.value = now * 0.001;
       }
-      grassInstanced.instanceMatrix.needsUpdate = true;
 
       // 8. Render 3D Scene
       renderer.render(scene, camera);
@@ -952,16 +976,32 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         className="pointer-events-none absolute inset-0 z-10 h-full w-full block"
       />
 
-      {/* Mobile Gyroscope / Motion Indicator Badge */}
-      <div className="pointer-events-none absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/60 px-3 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-md">
-        <span>🧭 Giroscopio 360° Activo</span>
-      </div>
+      {/* Explicit Mobile Gyroscope Permission Prompt (iOS Safari) */}
+      {showGyroPrompt && (
+        <button
+          data-no-swat="true"
+          onClick={handleRequestGyroExplicit}
+          className="absolute top-28 right-3.5 z-40 flex items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-700 to-red-700 px-4 py-2.5 text-xs font-black text-white shadow-2xl backdrop-blur-md active:scale-95 animate-pulse"
+        >
+          <span className="text-sm">🧭</span>
+          <span>ACTIVAR GIROSCOPIO</span>
+        </button>
+      )}
+
+      {/* Gyroscope Recenter / Status Button */}
+      <button
+        data-no-swat="true"
+        onClick={handleCalibrateCenter}
+        className="absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/70 px-3 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-md active:scale-95 transition hover:bg-black/90"
+      >
+        <span>🧭 {isGyroActive || sensorManager.hasGyroData() ? 'Giroscopio Activo • Recentrar' : 'Recentrar'}</span>
+      </button>
 
       {/* PC Controls Hint Badge */}
       <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/40 bg-black/60 px-4 py-1.5 backdrop-blur-md text-xs font-semibold text-emerald-200">
-        <span>🏃 WASD / Mover teléfono para avanzar</span>
+        <span>🏃 WASD / Flechas para caminar</span>
         <span className="text-emerald-500">•</span>
-        <span>🧭 Giroscopio / Mouse para mirar</span>
+        <span>🧭 Giroscopio (móvil) / Mouse para mirar</span>
         <span className="text-emerald-500">•</span>
         <span>⚔️ Deslizar para cortar</span>
       </div>
