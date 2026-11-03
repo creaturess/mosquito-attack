@@ -15,10 +15,20 @@ import { LevelModal } from './components/LevelModal';
 import { sensorManager, SensorStatus } from './sensors/SensorManager';
 import { buzzManager } from './audio/SpatialBuzzManager';
 
-const LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
-  1: 60, // 60 seconds for Level 1
+const CAMERA_LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
+  1: 60, // 60 seconds for Level 1 (Camera Mode)
   2: 30, // 30 seconds for Level 2
   3: 20, // 20 seconds for Level 3
+};
+
+const FIELD_LEVEL_DURATIONS: Record<1 | 2 | 3, number> = {
+  1: 80, // 80 seconds for Level 1 in Field Mode (+20s)
+  2: 50, // 50 seconds for Level 2 in Field Mode (+20s)
+  3: 40, // 40 seconds for Level 3 in Field Mode (+20s)
+};
+
+const getLevelDuration = (mode: 'camera' | 'field' | null, lvl: 1 | 2 | 3) => {
+  return mode === 'field' ? FIELD_LEVEL_DURATIONS[lvl] : CAMERA_LEVEL_DURATIONS[lvl];
 };
 
 const TARGET_KILLS: Record<1 | 2 | 3, number> = {
@@ -36,7 +46,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>({
     currentLevel: 1,
     isPlaying: false,
-    timeLeft: LEVEL_DURATIONS[1],
+    timeLeft: CAMERA_LEVEL_DURATIONS[1],
     kills: 0,
     targetKills: TARGET_KILLS[1],
     bossHealthPercent: 100,
@@ -137,7 +147,11 @@ export default function App() {
     buzzManager.playDefeatSfx();
     sensorManager.triggerHaptic('gameover');
     if (state.currentLevel === 3) {
-      setGameOverReason('¡No lograste gritar los 10 segundos necesarios antes de los 20 segundos!');
+      setGameOverReason(
+        gameMode === 'field'
+          ? '¡No lograste gritar los 10 segundos necesarios antes de que se acabe el tiempo!'
+          : '¡No lograste gritar los 10 segundos necesarios antes de los 20 segundos!'
+      );
     } else {
       setGameOverReason(`Se acabó el tiempo. Solo lograste matar ${state.kills} de los ${state.targetKills} requeridos.`);
     }
@@ -155,7 +169,7 @@ export default function App() {
       currentLevel: 1,
       kills: 0,
       targetKills: TARGET_KILLS[1],
-      timeLeft: LEVEL_DURATIONS[1],
+      timeLeft: CAMERA_LEVEL_DURATIONS[1],
       isPlaying: false,
     }));
     setActiveModal('level_start');
@@ -172,7 +186,7 @@ export default function App() {
       currentLevel: 1,
       kills: 0,
       targetKills: TARGET_KILLS[1],
-      timeLeft: LEVEL_DURATIONS[1],
+      timeLeft: FIELD_LEVEL_DURATIONS[1],
       isPlaying: false,
     }));
     setActiveModal('level_start');
@@ -192,7 +206,7 @@ export default function App() {
       currentLevel: 1,
       kills: 0,
       targetKills: TARGET_KILLS[1],
-      timeLeft: LEVEL_DURATIONS[1],
+      timeLeft: CAMERA_LEVEL_DURATIONS[1],
       isPlaying: false,
     }));
   };
@@ -205,7 +219,7 @@ export default function App() {
     }
     setGameState((prev) => ({
       ...prev,
-      timeLeft: LEVEL_DURATIONS[prev.currentLevel],
+      timeLeft: getLevelDuration(gameMode, prev.currentLevel),
       kills: 0,
       targetKills: TARGET_KILLS[prev.currentLevel],
       screamSecondsAccumulated: 0,
@@ -240,7 +254,7 @@ export default function App() {
       setGameState((prev) => ({
         ...prev,
         currentLevel: nextLvl,
-        timeLeft: LEVEL_DURATIONS[nextLvl],
+        timeLeft: getLevelDuration(gameMode, nextLvl),
         kills: 0,
         targetKills: TARGET_KILLS[nextLvl],
         screamSecondsAccumulated: 0,

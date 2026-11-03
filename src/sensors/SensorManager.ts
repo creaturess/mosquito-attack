@@ -92,9 +92,20 @@ export class SensorManager {
   private readonly LIMIT_Y_DOWN = 0.8;
   private readonly LIMIT_Z = 7.5;
 
+  private listenersAttached: boolean = false;
+  private gravityFilterInitialized: boolean = false;
+
   constructor() {
     this.handleDeviceOrientation = this.handleDeviceOrientation.bind(this);
+    this.handleDeviceOrientationAbsolute = this.handleDeviceOrientationAbsolute.bind(this);
     this.handleDeviceMotion = this.handleDeviceMotion.bind(this);
+
+    // Proactively attach on modern Android / Chromium browsers (no user gesture required)
+    if (typeof window !== 'undefined') {
+      try {
+        this.startMotionListeners();
+      } catch {}
+    }
   }
 
   /**
@@ -131,6 +142,18 @@ export class SensorManager {
         }
       }
 
+      // Android permission queries (Chromium/Android 79+)
+      try {
+        if (typeof navigator !== 'undefined' && 'permissions' in navigator) {
+          (navigator.permissions as unknown as { query: (p: { name: string }) => Promise<unknown> })
+            .query({ name: 'accelerometer' })
+            .catch(() => {});
+          (navigator.permissions as unknown as { query: (p: { name: string }) => Promise<unknown> })
+            .query({ name: 'gyroscope' })
+            .catch(() => {});
+        }
+      } catch {}
+
       this.startMotionListeners();
       return true;
     } catch (e) {
@@ -142,9 +165,18 @@ export class SensorManager {
   }
 
   private startMotionListeners() {
+    if (this.listenersAttached) return;
+    this.listenersAttached = true;
+
     window.addEventListener('deviceorientation', this.handleDeviceOrientation, true);
+    // Many Android phones (Pixel, Samsung, Xiaomi) fire deviceorientationabsolute with full 3D angles
+    window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientationAbsolute as EventListener, true);
     window.addEventListener('devicemotion', this.handleDeviceMotion, true);
     this.status.gyroscopeActive = true;
+  }
+
+  private handleDeviceOrientationAbsolute(event: DeviceOrientationEvent) {
+    this.handleDeviceOrientation(event);
   }
 
   public calibrateCenter() {
@@ -152,6 +184,7 @@ export class SensorManager {
     this.calibratedBeta = this.rawOrientation.beta !== undefined ? this.rawOrientation.beta : 65;
     this.calibratedGamma = this.rawOrientation.gamma !== undefined ? this.rawOrientation.gamma : 0;
     this.gravityFilter = { x: 0, y: 9.8, z: 0 };
+    this.gravityFilterInitialized = false;
     this.stepCount = 0;
     this.physicalSpeedMps = 0;
     this.manualEuler.yaw = 0;
@@ -166,19 +199,56 @@ export class SensorManager {
   }
 
   private handleDeviceOrientation(event: DeviceOrientationEvent) {
-    if (event.alpha !== null && event.beta !== null && event.gamma !== null) {
+    let alpha = event.alpha;
+    const beta = event.beta;
+    const gamma = event.gamma;
+
+    // Check for iOS webkitCompassHeading or Android devices with compass heading
+    if (
+      (alpha === null || alpha === undefined) &&
+      (event as unknown as { webkitCompassHeading?: number }).webkitCompassHeading !== undefined
+    ) {
+      alpha = (event as unknown as { webkitCompassHeading: number }).webkitCompassHeading;
+    }
+
+    if (beta !== null && beta !== undefined && gamma !== null && gamma !== undefined) {
       this.hasReceivedGyroData = true;
       this.status.gyroscopeActive = true;
+      this.status.gyroscopeAllowed = true;
 
-      if (this.initialAlphaOffset === null) {
-        this.initialAlphaOffset = event.alpha;
-        this.calibratedBeta = event.beta;
-        this.calibratedGamma = event.gamma;
+      // Compensate for screen orientation (portrait vs landscape across diverse phone models)
+      const screenAngle =
+        typeof window !== 'undefined'
+          ? ((window.screen?.orientation as unknown as { angle?: number })?.angle ??
+              (typeof window.orientation === 'number' ? window.orientation : 0))
+          : 0;
+
+      let adjustedBeta = beta;
+      let adjustedGamma = gamma;
+      let adjustedAlpha = alpha !== null && alpha !== undefined ? alpha : (this.initialAlphaOffset || 0);
+
+      if (screenAngle === 90) {
+        const temp = adjustedBeta;
+        adjustedBeta = -adjustedGamma;
+        adjustedGamma = temp;
+      } else if (screenAngle === -90 || screenAngle === 270) {
+        const temp = adjustedBeta;
+        adjustedBeta = adjustedGamma;
+        adjustedGamma = -temp;
+      } else if (screenAngle === 180) {
+        adjustedBeta = -adjustedBeta;
+        adjustedGamma = -adjustedGamma;
       }
 
-      this.rawOrientation.alpha = event.alpha;
-      this.rawOrientation.beta = event.beta;
-      this.rawOrientation.gamma = event.gamma;
+      if (this.initialAlphaOffset === null && adjustedAlpha !== 0) {
+        this.initialAlphaOffset = adjustedAlpha;
+        this.calibratedBeta = adjustedBeta;
+        this.calibratedGamma = adjustedGamma;
+      }
+
+      this.rawOrientation.alpha = adjustedAlpha;
+      this.rawOrientation.beta = adjustedBeta;
+      this.rawOrientation.gamma = adjustedGamma;
     }
   }
 
@@ -221,10 +291,17 @@ export class SensorManager {
       // Fallback to high-pass filtered accelerationIncludingGravity
       const rawGrav = event.accelerationIncludingGravity;
       if (rawGrav && rawGrav.x !== null && rawGrav.y !== null && rawGrav.z !== null) {
-        const alpha = 0.86;
-        this.gravityFilter.x = alpha * this.gravityFilter.x + (1 - alpha) * rawGrav.x;
-        this.gravityFilter.y = alpha * this.gravityFilter.y + (1 - alpha) * rawGrav.y;
-        this.gravityFilter.z = alpha * this.gravityFilter.z + (1 - alpha) * rawGrav.z;
+        if (!this.gravityFilterInitialized) {
+          this.gravityFilter.x = rawGrav.x;
+          this.gravityFilter.y = rawGrav.y;
+          this.gravityFilter.z = rawGrav.z;
+          this.gravityFilterInitialized = true;
+        } else {
+          const alpha = 0.86;
+          this.gravityFilter.x = alpha * this.gravityFilter.x + (1 - alpha) * rawGrav.x;
+          this.gravityFilter.y = alpha * this.gravityFilter.y + (1 - alpha) * rawGrav.y;
+          this.gravityFilter.z = alpha * this.gravityFilter.z + (1 - alpha) * rawGrav.z;
+        }
 
         lx = rawGrav.x - this.gravityFilter.x;
         ly = rawGrav.y - this.gravityFilter.y;
