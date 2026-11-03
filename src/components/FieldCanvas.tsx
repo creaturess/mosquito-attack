@@ -221,7 +221,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
     // Soft golden-green atmospheric distant fog
     scene.fog = new THREE.FogExp2(0xd6e5c8, 0.024);
 
-    const camera = new THREE.PerspectiveCamera(70, width / height, 0.1, 120);
+    // Near plane 0.35 and far plane 65.0 preserve high 24-bit depth precision on mobile GPUs (prevents Z-fighting and geometry jitter)
+    const camera = new THREE.PerspectiveCamera(70, width / height, 0.35, 65.0);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
@@ -351,6 +352,9 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       roughness: 0.9,
       metalness: 0.03,
       flatShading: false,
+      polygonOffset: true,
+      polygonOffsetFactor: 1.0,
+      polygonOffsetUnits: 1.0,
     });
     const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
     terrainMesh.receiveShadow = true;
@@ -529,17 +533,24 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
     const pollenPoints = new THREE.Points(pollenGeom, pollenMat);
     scene.add(pollenPoints);
 
-    // --- 9. First-Person Player Navigation State ---
+    // --- 9. First-Person Player Navigation State (Decoupled Physics & Visual Interpolation) ---
     const player = {
       position: new THREE.Vector3(0, 0, 0),
+      prevPosition: new THREE.Vector3(0, 0, 0),
+      visualPosition: new THREE.Vector3(0, 0, 0),
       velocity: new THREE.Vector3(0, 0, 0),
       yaw: 0,
+      prevYaw: 0,
       pitch: 0,
+      prevPitch: 0,
       roll: 0,
+      prevRoll: 0,
       eyeHeight: 1.65,
       walkSpeed: 6.5,
     };
     player.position.y = getTerrainHeight(0, 0) + player.eyeHeight;
+    player.prevPosition.copy(player.position);
+    player.visualPosition.copy(player.position);
     camera.position.copy(player.position);
 
     // Keyboard states for PC
@@ -680,22 +691,25 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       spawnFieldMosquito();
     }
 
-    // --- 12. Main Animation Loop ---
+    // --- 12. Main Fixed Timestep Game Loop (Decoupled Physics & Alpha Interpolation) ---
     let animFrameId: number;
     let lastTime = performance.now();
+    let accumulator = 0;
     let screamAccumulator = 0;
+    const FIXED_DT = 1 / 60; // 60 UPS fixed physics step
+    const MAX_ACCUMULATOR = 0.1; // Clamp to avoid spiral of death on backgrounding/stalls
 
-    const tick = () => {
-      animFrameId = requestAnimationFrame(tick);
-
-      const now = performance.now();
-      const delta = Math.min((now - lastTime) / 1000, 0.08);
-      lastTime = now;
+    // Fixed physics update step
+    const fixedPhysicsStep = (dt: number) => {
+      // Snapshot previous states for sub-frame alpha interpolation
+      player.prevPosition.copy(player.position);
+      player.prevYaw = player.yaw;
+      player.prevPitch = player.pitch;
+      player.prevRoll = player.roll;
 
       // 1. Update SensorManager (DeviceOrientationEvent & Audio)
       const sensorData = sensorManager.update();
       const { orientation, status } = sensorData;
-
       const hasGyro = sensorManager.hasGyroData() || status.gyroscopeActive;
 
       // GYROSCOPE ORIENTATION:
@@ -739,8 +753,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         .addScaledVector(_forwardDir, moveForward * player.walkSpeed)
         .addScaledVector(_rightDir, moveRight * player.walkSpeed);
 
-      player.velocity.lerp(_targetVel, delta * 9.0);
-      player.position.addScaledVector(player.velocity, delta);
+      player.velocity.lerp(_targetVel, dt * 9.0);
+      player.position.addScaledVector(player.velocity, dt);
 
       // Clamp player within the compact meadow perimeter (radius 18.5m)
       const distFromCenter = Math.hypot(player.position.x, player.position.z);
@@ -755,23 +769,14 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       player.position.y = THREE.MathUtils.lerp(
         player.position.y,
         targetGroundY + player.eyeHeight,
-        delta * 8.0
+        dt * 8.0
       );
-
-      // Update Camera Transform from Gyro + Player Pos
-      camera.position.copy(player.position);
-      camera.rotation.set(0, 0, 0);
-      camera.rotateY(player.yaw);
-      camera.rotateX(player.pitch);
-      if (player.roll !== 0) {
-        camera.rotateZ(player.roll);
-      }
 
       // 2. Poll Scream Metric for Level 3 Boss
       if (currentLevel === 3) {
         const { audio } = sensorData;
         if (audio.isScreaming) {
-          screamAccumulator += delta;
+          screamAccumulator += dt;
           onScreamProgressRef.current(screamAccumulator);
 
           if (screamAccumulator >= 10.0 && mosquitoes.length > 0) {
@@ -788,20 +793,62 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
 
       // 3. Spawn more mosquitoes in waves if needed
       if (currentLevel < 3 && totalSpawned < targetKills && mosquitoes.length < maxSimultaneous) {
-        spawnTimer += delta;
+        spawnTimer += dt;
         if (spawnTimer > 1.2) {
           spawnTimer = 0;
           spawnFieldMosquito();
         }
       }
 
-      // 4. Update Mosquitos & 3D Spatial Audio
+      // 4. Fixed physics tick for all active mosquitoes
+      for (let i = mosquitoes.length - 1; i >= 0; i--) {
+        mosquitoes[i].fixedUpdate(dt, player.position, getTerrainHeight);
+      }
+    };
+
+    const tick = () => {
+      animFrameId = requestAnimationFrame(tick);
+
+      const now = performance.now();
+      let frameTime = (now - lastTime) * 0.001;
+      lastTime = now;
+
+      // Guard against giant frame jumps (e.g. tab unfocus)
+      if (frameTime > MAX_ACCUMULATOR) frameTime = MAX_ACCUMULATOR;
+      accumulator += frameTime;
+
+      // Execute fixed timestep physics updates at constant 60 UPS
+      while (accumulator >= FIXED_DT) {
+        fixedPhysicsStep(FIXED_DT);
+        accumulator -= FIXED_DT;
+      }
+
+      // Compute sub-frame alpha interpolation factor (0.0 to 1.0)
+      const alpha = Math.min(1.0, Math.max(0.0, accumulator / FIXED_DT));
+
+      // Sub-frame Camera Position Interpolation (buttery smooth on 60Hz/90Hz/120Hz displays)
+      player.visualPosition.lerpVectors(player.prevPosition, player.position, alpha);
+      camera.position.copy(player.visualPosition);
+
+      // Sub-frame Camera Orientation Interpolation
+      const curYaw = THREE.MathUtils.lerp(player.prevYaw, player.yaw, alpha);
+      const curPitch = THREE.MathUtils.lerp(player.prevPitch, player.pitch, alpha);
+      const curRoll = THREE.MathUtils.lerp(player.prevRoll, player.roll, alpha);
+
+      camera.rotation.set(0, 0, 0);
+      camera.rotateY(curYaw);
+      camera.rotateX(curPitch);
+      if (curRoll !== 0) {
+        camera.rotateZ(curRoll);
+      }
+
+      // Sub-frame Mosquito Visual Interpolation & 3D Spatial Audio
       _screenTargetsCount = 0;
       _camQuatInv.copy(camera.quaternion).invert();
 
       for (let i = mosquitoes.length - 1; i >= 0; i--) {
         const mosq = mosquitoes[i];
-        mosq.update(delta, player.position, getTerrainHeight);
+        mosq.interpolateVisual(alpha);
 
         // Calculate 3D Positional Audio relative to player camera using scratch vector
         _relPos.copy(mosq.group.position).sub(camera.position).applyQuaternion(_camQuatInv);
@@ -838,7 +885,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         }
       }
 
-      // 5. Check Fruit Ninja Blade Intersections (Zero allocation, passing pre-allocated pool + count)
+      // Check Fruit Ninja Blade Intersections (Zero allocation, passing pre-allocated pool + count)
       const sliceHits = bladeDetector.checkIntersections(_screenTargetsPool, _screenTargetsCount);
       for (const hit of sliceHits) {
         const targetMosq = mosquitoes.find((m) => m.id === hit.targetId);
@@ -874,16 +921,16 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         }
       }
 
-      // 6. Update Sliced Halves & Blade Canvas
-      sliceManager.update(delta);
+      // Update Sliced Halves & Blade Canvas with frameTime
+      sliceManager.update(frameTime);
       bladeDetector.render();
 
-      // 7. GPU Grass Wind Sway Animation (Zero buffer re-upload, zero GPU stall)
+      // GPU Grass Wind Sway Animation (Zero buffer re-upload, zero GPU stall)
       if (grassMat.userData.shader?.uniforms?.uTime) {
         grassMat.userData.shader.uniforms.uTime.value = now * 0.001;
       }
 
-      // 8. Render 3D Scene
+      // Render 3D Scene
       renderer.render(scene, camera);
     };
 

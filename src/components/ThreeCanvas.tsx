@@ -612,8 +612,8 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
     const camera = new THREE.PerspectiveCamera(
       70,
       window.innerWidth / window.innerHeight,
-      0.1,
-      100
+      0.25,
+      45
     );
     camera.position.set(0.0, 1.6, 0.0);
 

@@ -27,6 +27,7 @@ const _toPlayer = new THREE.Vector3();
 const _targetPoint = new THREE.Vector3();
 const _desiredDir = new THREE.Vector3();
 const _moveStep = new THREE.Vector3();
+const _scratchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
 export class FieldMosquito {
   public id: string;
@@ -35,6 +36,18 @@ export class FieldMosquito {
   public isDead: boolean = false;
   public deathTime: number = 0;
   public level: 1 | 2 | 3;
+
+  // Physics & sub-frame interpolation vectors (zero GC allocation)
+  public physicsPosition: THREE.Vector3 = new THREE.Vector3();
+  public prevPosition: THREE.Vector3 = new THREE.Vector3();
+  public visualPosition: THREE.Vector3 = new THREE.Vector3();
+  public physicsQuat: THREE.Quaternion = new THREE.Quaternion();
+  public prevQuat: THREE.Quaternion = new THREE.Quaternion();
+  public visualQuat: THREE.Quaternion = new THREE.Quaternion();
+
+  // Normalized animation phase accumulator (0.0 to 1.0) for stutter-free wing flapping
+  private wingPhase: number = 0;
+  private flightBlend: number = 0; // Cross-fading blend factor between approach and orbit
 
   // 3D GLTF Model instance
   public gltfModel: THREE.Group | null = null;
@@ -113,6 +126,13 @@ export class FieldMosquito {
     this.group = new THREE.Group();
     this.group.name = `FieldMosquito_${this.id}`;
     this.group.position.copy(options.spawnPosition);
+
+    this.physicsPosition.copy(options.spawnPosition);
+    this.prevPosition.copy(options.spawnPosition);
+    this.visualPosition.copy(options.spawnPosition);
+    this.physicsQuat.copy(this.group.quaternion);
+    this.prevQuat.copy(this.group.quaternion);
+    this.visualQuat.copy(this.group.quaternion);
 
     this.approachTarget = options.playerInitialPos.clone();
 
@@ -193,25 +213,29 @@ export class FieldMosquito {
     });
   }
 
-  public update(delta: number, playerPos: THREE.Vector3, groundHeightAt: (x: number, z: number) => number) {
+  /**
+   * Fixed Timestep Physics Update (60 UPS decoupled from screen refresh rate)
+   */
+  public fixedUpdate(fixedDt: number, playerPos: THREE.Vector3, groundHeightAt: (x: number, z: number) => number) {
     if (this.isDead) return;
+
+    // Snapshot previous physics tick state for sub-frame alpha interpolation
+    this.prevPosition.copy(this.physicsPosition);
+    this.prevQuat.copy(this.physicsQuat);
+
+    // Normalized wing phase accumulator (0.0 to 1.0)
+    this.wingPhase = (this.wingPhase + fixedDt * (this.flapSpeed * 0.16)) % 1.0;
 
     const time = performance.now() * 0.001 + this.timeOffset;
 
-    // Wing flapping animation
-    if (this.gltfLeftWing && this.gltfRightWing) {
-      const flap = Math.sin(time * this.flapSpeed) * 0.55;
-      this.gltfLeftWing.rotation.z = flap;
-      this.gltfRightWing.rotation.z = -flap;
-    }
-
-    _prevPos.copy(this.group.position);
+    _prevPos.copy(this.physicsPosition);
 
     // Flight target computation using scratch vectors
-    _toPlayer.copy(playerPos).sub(this.group.position);
+    _toPlayer.copy(playerPos).sub(this.physicsPosition);
     const distToPlayer = _toPlayer.length();
 
     if (this.isApproaching) {
+      this.flightBlend = Math.max(0.0, this.flightBlend - fixedDt * 2.5);
       // Phase 1: Flying in smoothly from afar towards the player
       _targetPoint.set(
         playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius,
@@ -223,22 +247,23 @@ export class FieldMosquito {
         this.isApproaching = false;
       }
     } else {
+      this.flightBlend = Math.min(1.0, this.flightBlend + fixedDt * 2.5);
       // Phase 2: Orbiting, swooping, and hovering around the player's current position
-      this.orbitAngle += this.orbitSpeed * delta;
+      this.orbitAngle += this.orbitSpeed * fixedDt;
       const targetX = playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius;
       const targetZ = playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
       const targetY = playerPos.y + 0.3 + Math.sin(time * 2.2) * 0.8 + this.orbitHeightOffset;
 
       _targetPoint.set(targetX, targetY, targetZ);
 
-      // If player moved away (> 5.5m), fly back towards player immediately
+      // If player moved away (> 5.5m), fly back towards player smoothly
       if (distToPlayer > 5.5) {
         this.isApproaching = true;
       }
     }
 
     // Erratic darting (insect revoloteo)
-    this.dartTimer += delta;
+    this.dartTimer += fixedDt;
     if (this.dartTimer > (this.level === 2 ? 0.6 : 1.2)) {
       this.dartTimer = 0;
       this.isDarting = Math.random() > 0.4;
@@ -257,7 +282,7 @@ export class FieldMosquito {
     _targetPoint.add(this.dartOffset);
 
     // Steer towards target point
-    _desiredDir.copy(_targetPoint).sub(this.group.position);
+    _desiredDir.copy(_targetPoint).sub(this.physicsPosition);
     const desiredDist = _desiredDir.length();
     if (desiredDist > 0.05) {
       _desiredDir.normalize();
@@ -265,7 +290,7 @@ export class FieldMosquito {
         ? this.baseSpeed * (this.isBoss ? 1.1 : 1.3)
         : this.baseSpeed * (0.8 + Math.sin(time * 3) * 0.2);
 
-      this.flightVelocity.lerp(_desiredDir.multiplyScalar(speed), delta * 4.5);
+      this.flightVelocity.lerp(_desiredDir.multiplyScalar(speed), fixedDt * 4.5);
     }
 
     // Micro buzz flutter
@@ -273,52 +298,80 @@ export class FieldMosquito {
     const flutterY = Math.cos(time * 31 + this.flutterPhase) * 0.05;
     const flutterZ = Math.sin(time * 25) * 0.04;
 
-    this.group.position.addScaledVector(this.flightVelocity, delta);
-    this.group.position.x += flutterX;
-    this.group.position.y += flutterY;
-    this.group.position.z += flutterZ;
+    this.physicsPosition.addScaledVector(this.flightVelocity, fixedDt);
+    this.physicsPosition.x += flutterX;
+    this.physicsPosition.y += flutterY;
+    this.physicsPosition.z += flutterZ;
 
     // Terrain ground avoidance: never clip into grass/terrain
-    const terrainY = groundHeightAt(this.group.position.x, this.group.position.z);
+    const terrainY = groundHeightAt(this.physicsPosition.x, this.physicsPosition.z);
     const minHeightAboveGround = this.isBoss ? 2.5 : 0.75;
-    if (this.group.position.y < terrainY + minHeightAboveGround) {
-      this.group.position.y = THREE.MathUtils.lerp(
-        this.group.position.y,
+    if (this.physicsPosition.y < terrainY + minHeightAboveGround) {
+      this.physicsPosition.y = THREE.MathUtils.lerp(
+        this.physicsPosition.y,
         terrainY + minHeightAboveGround,
-        delta * 6.0
+        fixedDt * 6.0
       );
       this.flightVelocity.y = Math.max(0.5, this.flightVelocity.y);
     }
 
     // Upright heading orientation (look towards movement direction)
-    _moveStep.copy(this.group.position).sub(_prevPos);
+    _moveStep.copy(this.physicsPosition).sub(_prevPos);
     if (_moveStep.lengthSq() > 0.0001) {
       const heading = Math.atan2(_moveStep.x, _moveStep.z);
-      this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, heading, delta * 7.0);
+      this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, heading, fixedDt * 7.0);
 
       const horizontalSpeed = Math.hypot(_moveStep.x, _moveStep.z);
       const pitchTarget = Math.atan2(_moveStep.y, Math.max(0.05, horizontalSpeed));
       this.currentPitch = THREE.MathUtils.lerp(
         this.currentPitch,
         THREE.MathUtils.clamp(pitchTarget, -0.4, 0.4),
-        delta * 6.0
+        fixedDt * 6.0
       );
 
       const rollTarget = -_moveStep.x * 0.35;
       this.currentRoll = THREE.MathUtils.lerp(
         this.currentRoll,
         THREE.MathUtils.clamp(rollTarget, -0.35, 0.35),
-        delta * 5.0
+        fixedDt * 5.0
       );
 
-      this.group.rotation.set(0, 0, 0);
-      this.group.rotateY(this.currentYaw);
-      this.group.rotateX(-this.currentPitch);
-      this.group.rotateZ(this.currentRoll);
+      _scratchEuler.set(-this.currentPitch, this.currentYaw, this.currentRoll, 'YXZ');
+      this.physicsQuat.setFromEuler(_scratchEuler);
+    }
+  }
+
+  /**
+   * Sub-frame Linear & Spherical Interpolation for Display Refresh (60Hz / 90Hz / 120Hz)
+   */
+  public interpolateVisual(alpha: number) {
+    if (this.isDead) return;
+
+    // Mathematically exact sub-frame linear position interpolation
+    this.visualPosition.lerpVectors(this.prevPosition, this.physicsPosition, alpha);
+    this.group.position.copy(this.visualPosition);
+
+    // Spherical interpolation for buttery smooth rotation on high refresh screens
+    this.visualQuat.slerpQuaternions(this.prevQuat, this.physicsQuat, alpha);
+    this.group.quaternion.copy(this.visualQuat);
+
+    // Stutter-free normalized wing flapping
+    if (this.gltfLeftWing && this.gltfRightWing) {
+      const flap = Math.sin((this.wingPhase + alpha * (1 / 60) * (this.flapSpeed * 0.16)) * Math.PI * 2) * 0.55;
+      this.gltfLeftWing.rotation.z = flap;
+      this.gltfRightWing.rotation.z = -flap;
     }
 
-    // Update Motion Trail
+    // Update motion trail with visual position
     this.updateTrail();
+  }
+
+  /**
+   * Backward-compatible synchronous update
+   */
+  public update(delta: number, playerPos: THREE.Vector3, groundHeightAt: (x: number, z: number) => number) {
+    this.fixedUpdate(delta, playerPos, groundHeightAt);
+    this.interpolateVisual(1.0);
   }
 
   private updateTrail() {
