@@ -198,13 +198,13 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
   }, []);
 
   const handleStartExploration = async () => {
-    const granted = await sensorManager.requestGyroscope();
+    const granted = await sensorManager.requestSensors();
     sensorManager.calibrateZeroPoint();
     manualLookRef.current = { yaw: 0, pitch: 0 };
     setHasStartedExploration(true);
     setIsGyroActive(granted || sensorManager.hasGyroData());
     setShowGyroPrompt(false);
-    setCalibrationNotice('¡Punto Cero Calibrado y Sensores Activos!');
+    setCalibrationNotice('¡Punto Cero Calibrado y Sensores 6DOF Activos!');
     sensorManager.triggerHaptic('swat');
     setTimeout(() => {
       setCalibrationNotice(null);
@@ -785,7 +785,12 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         inputRight += phoneTilt.strafe;
       }
 
-      // 4. Strict Vector Normalization & Uniform Speed Calculation
+      // 4. Physical Spatial Translation (Linear acceleration transformed to camera space)
+      const physTrans = sensorManager.getPhysicalTranslationVelocity();
+      inputForward += physTrans.forward;
+      inputRight += physTrans.strafe;
+
+      // 5. Strict Vector Normalization & Uniform Speed Calculation
       const inputLen = Math.hypot(inputForward, inputRight);
       if (inputLen > 0.02) {
         const speedScale = Math.min(1.0, inputLen);
@@ -1114,10 +1119,10 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
               🧭
             </div>
             <h3 className="text-xl font-black text-emerald-400 uppercase tracking-wide">
-              Control por Giroscopio
+              Control 6DOF: Giroscopio y Traslación
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-stone-300">
-              Sostené el celular en tu postura natural y presioná el botón para calibrar el Punto Cero (0,0,0) y activar los sensores con suavizado avanzado.
+              Sostené el celular en tu postura natural y presioná el botón para calibrar el Punto Cero (0,0,0) y activar el seguimiento de rotación y traslación física en el espacio.
             </p>
             <button
               data-no-swat="true"

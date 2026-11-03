@@ -78,7 +78,13 @@ export class SensorManager {
   // Walk tilt deadzone: phone held within ±9.0° of calibrated neutral results in ZERO movement
   public tiltWalkDeadzoneDeg: number = 9.0;
 
-  // 4. Spatial Position (6DOF physical translation)
+  // 4. Physical Spatial Translation state (linear acceleration transformed to camera space)
+  private physicalVelocity = { forward: 0, strafe: 0 };
+  private readonly ACC_DEADZONE = 0.20; // Deadzone threshold in m/s^2 to eliminate hand tremors
+  private readonly VELOCITY_DRAG = 5.8; // High friction velocity dampening for instant braking
+  private readonly MAX_PHYS_VEL = 1.8;  // Maximum translation velocity clamp
+
+  // 5. Spatial Position (6DOF physical translation for AR mode)
   private readonly DEFAULT_X = 0.0;
   private readonly DEFAULT_Y = 1.6;
   private readonly DEFAULT_Z = 0.0;
@@ -92,17 +98,17 @@ export class SensorManager {
   public stepCount: number = 0;
   public physicalSpeedMps: number = 0;
 
-  // 5. Desktop fallback manual look (Mouse / Keyboard)
+  // 6. Desktop fallback manual look (Mouse / Keyboard)
   private manualEuler = { yaw: 0, pitch: 0 };
 
-  // 6. Audio Analysis (Microphone for Level 3 Boss scream)
+  // 7. Audio Analysis (Microphone for Level 3 Boss scream)
   private audioStream: MediaStream | null = null;
   private analyser: AnalyserNode | null = null;
   private freqDataArray: Uint8Array<ArrayBuffer> | null = null;
   private audioMetrics: AudioMetrics = { volume: 0, bassLevel: 0, isScreaming: false };
   public screamThreshold: number = 0.62;
 
-  // 7. AR Camera Passthrough
+  // 8. AR Camera Passthrough
   private cameraStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
 
@@ -135,7 +141,7 @@ export class SensorManager {
   /**
    * Request Gyroscope and Accelerometer permissions (required on iOS 13+ and Android)
    */
-  public async requestGyroscope(): Promise<boolean> {
+  public async requestSensors(): Promise<boolean> {
     try {
       const win = window as unknown as {
         DeviceOrientationEvent?: {
@@ -147,6 +153,9 @@ export class SensorManager {
       };
 
       let orientationGranted = true;
+      let motionGranted = true;
+
+      // 1. DeviceOrientationEvent permission (iOS 13+ Safari)
       if (typeof win.DeviceOrientationEvent?.requestPermission === 'function') {
         try {
           const response = await win.DeviceOrientationEvent.requestPermission();
@@ -157,14 +166,20 @@ export class SensorManager {
         }
       }
 
+      // 2. DeviceMotionEvent permission (iOS 13+ Safari)
       if (typeof win.DeviceMotionEvent?.requestPermission === 'function') {
         try {
-          await win.DeviceMotionEvent.requestPermission();
-        } catch {}
+          const response = await win.DeviceMotionEvent.requestPermission();
+          motionGranted = response === 'granted';
+        } catch (e) {
+          console.warn('DeviceMotionEvent permission prompt error:', e);
+          motionGranted = false;
+        }
       }
 
       this.status.gyroscopeAllowed = orientationGranted;
       this.status.gyroscopeActive = orientationGranted;
+      this.status.motionActive = motionGranted;
 
       // Request Chromium permissions if queryable
       try {
@@ -183,14 +198,18 @@ export class SensorManager {
       // Immediately queue zero calibration so the user's initial hand position becomes (0,0,0)
       this.calibrateZeroPoint();
 
-      return orientationGranted;
+      return orientationGranted || motionGranted;
     } catch (e) {
-      console.warn('requestGyroscope error:', e);
+      console.warn('requestSensors error:', e);
       this.status.gyroscopeAllowed = true;
       this.startMotionListeners();
       this.calibrateZeroPoint();
       return true;
     }
+  }
+
+  public async requestGyroscope(): Promise<boolean> {
+    return this.requestSensors();
   }
 
   public startMotionListeners() {
@@ -237,6 +256,8 @@ export class SensorManager {
 
     this.manualEuler.yaw = 0;
     this.manualEuler.pitch = 0;
+    this.physicalVelocity.forward = 0;
+    this.physicalVelocity.strafe = 0;
     this.linearVelocity.x = 0;
     this.linearVelocity.y = 0;
     this.linearVelocity.z = 0;
@@ -364,13 +385,17 @@ export class SensorManager {
       }
     }
 
-    // Physical projection using pitch
+    // Physical projection using current phone pitch and roll
     const pitchRad = (((this.smoothedBeta + this.zeroBeta) || 55) * Math.PI) / 180;
     const cosPitch = Math.cos(pitchRad);
     const sinPitch = Math.sin(pitchRad);
 
+    const rollRad = (this.smoothedGamma * Math.PI) / 180;
+    const cosRoll = Math.cos(rollRad);
+    const sinRoll = Math.sin(rollRad);
+
     const rawForwardAcc = -lz * sinPitch + ly * cosPitch;
-    const rawStrafeAcc = lx;
+    const rawStrafeAcc = lx * cosRoll + ly * sinRoll;
 
     // Pedometer step detection: intentional footsteps while exploring
     const netMag = Math.sqrt(lx * lx + ly * ly + lz * lz);
@@ -391,39 +416,59 @@ export class SensorManager {
     }
     this.prevMag = netMag;
 
-    // Deadband threshold: completely cuts out hand tremors (< 0.16 m/s^2)
-    const deadband = 0.16;
-    const applyDeadband = (val: number): number => {
+    // Deadband threshold: completely cuts out hand tremors and sensor micro-vibrations
+    const applyDeadzone = (val: number): number => {
       const abs = Math.abs(val);
-      if (abs < deadband) return 0;
-      return Math.sign(val) * (abs - deadband);
+      if (abs < this.ACC_DEADZONE) return 0;
+      return Math.sign(val) * (abs - this.ACC_DEADZONE);
     };
 
-    const accFwd = applyDeadband(rawForwardAcc);
-    const accStrafe = applyDeadband(rawStrafeAcc);
+    const accFwd = applyDeadzone(rawForwardAcc);
+    const accStrafe = applyDeadzone(rawStrafeAcc);
 
-    const thrustGain = 2.8 * this.motionSensitivity;
+    const thrustGain = 2.6 * this.motionSensitivity;
     if (accFwd !== 0) {
+      this.physicalVelocity.forward += accFwd * dt * thrustGain;
       this.linearVelocity.z += accFwd * dt * thrustGain;
     }
     if (accStrafe !== 0) {
-      this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.8);
+      this.physicalVelocity.strafe += accStrafe * dt * (thrustGain * 0.85);
+      this.linearVelocity.x += accStrafe * dt * (thrustGain * 0.85);
     }
 
-    // High friction damping: halts immediately when phone physical thrust stops
-    const drag = 4.5;
-    const friction = Math.exp(-drag * dt);
+    // High friction / velocity dampening: halts immediately when phone physical thrust stops
+    const friction = Math.exp(-this.VELOCITY_DRAG * dt);
+    this.physicalVelocity.forward *= friction;
+    this.physicalVelocity.strafe *= friction;
     this.linearVelocity.z *= friction;
     this.linearVelocity.x *= friction;
 
     // Hard clamp to zero when velocity drops below creeping threshold (eliminates creeping drift)
-    if (Math.abs(this.linearVelocity.z) < 0.02) this.linearVelocity.z = 0;
-    if (Math.abs(this.linearVelocity.x) < 0.02) this.linearVelocity.x = 0;
+    if (Math.abs(this.physicalVelocity.forward) < 0.025) this.physicalVelocity.forward = 0;
+    if (Math.abs(this.physicalVelocity.strafe) < 0.025) this.physicalVelocity.strafe = 0;
+    if (Math.abs(this.linearVelocity.z) < 0.025) this.linearVelocity.z = 0;
+    if (Math.abs(this.linearVelocity.x) < 0.025) this.linearVelocity.x = 0;
 
     // Maximum translation velocity clamp
-    const maxSpeed = 1.6 * this.motionSensitivity;
+    this.physicalVelocity.forward = Math.max(
+      -this.MAX_PHYS_VEL,
+      Math.min(this.MAX_PHYS_VEL, this.physicalVelocity.forward)
+    );
+    this.physicalVelocity.strafe = Math.max(
+      -this.MAX_PHYS_VEL,
+      Math.min(this.MAX_PHYS_VEL, this.physicalVelocity.strafe)
+    );
+
     // Continuous translation velocity in 6DOF space
-    this.physicalSpeedMps = Math.hypot(this.linearVelocity.z, this.linearVelocity.x);
+    this.physicalSpeedMps = Math.hypot(this.physicalVelocity.forward, this.physicalVelocity.strafe);
+  }
+
+  /**
+   * Returns physical spatial translation velocity (forward/backward and strafe)
+   * in the camera's local coordinate frame, filtered with deadzone and velocity dampening.
+   */
+  public getPhysicalTranslationVelocity(): { forward: number; strafe: number } {
+    return this.physicalVelocity;
   }
 
   /**
