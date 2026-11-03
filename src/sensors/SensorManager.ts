@@ -47,12 +47,27 @@ export class SensorManager {
     cameraActive: false,
   };
 
-  // Orientation state
+  // 1. Raw sensor readings
   private rawOrientation = { alpha: 0, beta: 0, gamma: 0 };
-  private smoothedOrientation = { alpha: 0, beta: 0, gamma: 0 };
-  private initialAlphaOffset: number | null = null;
-  private calibratedBeta: number = 65; // Resting phone pitch angle
-  private calibratedGamma: number = 0;
+
+  // 2. Calibrated Zero Point (Point Zero 0,0,0 reference)
+  public isCalibrated: boolean = false;
+  private zeroAlpha: number = 0;
+  private zeroBeta: number = 60; // neutral resting phone pitch
+  private zeroGamma: number = 0;
+
+  // 3. Low-Pass Filter (LPF) smoothed relative angles
+  private smoothedAlpha: number = 0;
+  private smoothedBeta: number = 0;
+  private smoothedGamma: number = 0;
+
+  // 4. Robust tuning parameters for smooth organic exploration
+  public rotationDamping: number = 0.09; // Low-pass filter damping factor (0.05 to 0.15)
+  public angularDeadzoneDeg: number = 0.75; // Hand tremor deadzone in degrees
+  public tiltWalkDeadzoneDeg: number = 10.0; // Walk tilt deadzone in degrees
+  public yawSensitivity: number = 1.0; // 1:1 proportional scale
+  public pitchSensitivity: number = 1.0;
+
   private hasReceivedGyroData = false;
 
   // Spatial Translation state (6DOF position tracking in real environment)
@@ -66,7 +81,7 @@ export class SensorManager {
 
   // Sensitivity settings
   public motionSensitivity: number = 1.5; // Calibrated for natural physical phone translation
-  public tiltAssistEnabled: boolean = false; // Disabled by default: tilting phone looks around, doesn't cause runaway movement!
+  public tiltAssistEnabled: boolean = false;
 
   // Manual touch/mouse drag fallback for desktop / non-gyro devices
   private manualEuler = { yaw: 0, pitch: 0 };
@@ -201,17 +216,33 @@ export class SensorManager {
     this.handleDeviceOrientation(event);
   }
 
-  public calibrateCenter() {
-    this.initialAlphaOffset = this.rawOrientation.alpha;
-    this.calibratedBeta = this.rawOrientation.beta !== undefined ? this.rawOrientation.beta : 65;
-    this.calibratedGamma = this.rawOrientation.gamma !== undefined ? this.rawOrientation.gamma : 0;
+  /**
+   * Calibrate current device physical posture as the exact Zero Point (0,0) reference
+   */
+  public calibrateZeroPoint() {
+    this.zeroAlpha = this.rawOrientation.alpha;
+    this.zeroBeta = this.rawOrientation.beta !== 0 ? this.rawOrientation.beta : 60;
+    this.zeroGamma = this.rawOrientation.gamma !== 0 ? this.rawOrientation.gamma : 0;
+    this.smoothedAlpha = 0;
+    this.smoothedBeta = 0;
+    this.smoothedGamma = 0;
+    this.isCalibrated = true;
+    this.manualEuler.yaw = 0;
+    this.manualEuler.pitch = 0;
+    this.linearVelocity.x = 0;
+    this.linearVelocity.y = 0;
+    this.linearVelocity.z = 0;
+    this.accumulatedStepDistance = 0;
     this.gravityFilter = { x: 0, y: 9.8, z: 0 };
     this.gravityFilterInitialized = false;
     this.stepCount = 0;
     this.physicalSpeedMps = 0;
-    this.manualEuler.yaw = 0;
-    this.manualEuler.pitch = 0;
     this.resetPosition();
+  }
+
+  // Backward-compatible alias
+  public calibrateCenter() {
+    this.calibrateZeroPoint();
   }
 
   public resetPosition() {
@@ -247,7 +278,7 @@ export class SensorManager {
 
       let adjustedBeta = beta;
       let adjustedGamma = gamma;
-      let adjustedAlpha = alpha !== null && alpha !== undefined ? alpha : (this.initialAlphaOffset || 0);
+      let adjustedAlpha = alpha !== null && alpha !== undefined ? alpha : 0;
 
       if (screenAngle === 90) {
         const temp = adjustedBeta;
@@ -262,15 +293,14 @@ export class SensorManager {
         adjustedGamma = -adjustedGamma;
       }
 
-      if (this.initialAlphaOffset === null && adjustedAlpha !== 0) {
-        this.initialAlphaOffset = adjustedAlpha;
-        this.calibratedBeta = adjustedBeta;
-        this.calibratedGamma = adjustedGamma;
-      }
-
       this.rawOrientation.alpha = adjustedAlpha;
       this.rawOrientation.beta = adjustedBeta;
       this.rawOrientation.gamma = adjustedGamma;
+
+      // Auto-calibrate point zero on the very first orientation event if not yet calibrated
+      if (!this.isCalibrated && adjustedAlpha !== 0) {
+        this.calibrateZeroPoint();
+      }
     }
   }
 
@@ -334,7 +364,7 @@ export class SensorManager {
 
     // 2. Physical projection based on current phone pitch tilt
     // Player holds phone tilted back by ~45-75 deg. Forward in world is along camera horizontal gaze.
-    const pitchRad = ((this.smoothedOrientation.beta || 60) * Math.PI) / 180;
+    const pitchRad = (((this.smoothedBeta + this.zeroBeta) || 60) * Math.PI) / 180;
     const cosPitch = Math.cos(pitchRad);
     const sinPitch = Math.sin(pitchRad);
 
@@ -439,24 +469,30 @@ export class SensorManager {
    * - Tilting phone slightly backward (> 14° from resting): back up slowly
    * - Tilting phone sideways (> 10°): strafe left/right
    */
+  /**
+   * Translates intentional phone forward/backward tilt into fluid walking speed (-1.0 to 1.0)
+   * With strict deadzone to guarantee ZERO phantom walking when holding the phone naturally.
+   */
   public getPhoneTiltWalk(): { forward: number; strafe: number } {
     if (!this.hasReceivedGyroData) return { forward: 0, strafe: 0 };
 
-    const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
+    // smoothedBeta is 0 at the calibrated resting posture
     let forward = 0;
-    // Deadband of 8 degrees to allow looking around without walking
-    if (deltaBeta < -8) {
-      // Forward tilt walks forward (up to 1.0 intensity)
-      forward = Math.min(1.0, (-deltaBeta - 8) / 18);
-    } else if (deltaBeta > 14) {
-      // Backward tilt backs up gently
-      forward = Math.max(-0.6, -(deltaBeta - 14) / 20);
+    // Deadzone: tilting phone forward by > 10 degrees initiates walking
+    if (this.smoothedBeta < -this.tiltWalkDeadzoneDeg) {
+      const tiltExcess = -this.smoothedBeta - this.tiltWalkDeadzoneDeg;
+      // Proportional scale: smooth acceleration up to 1.0 (reaches max at ~28° forward tilt)
+      forward = Math.min(1.0, tiltExcess / 18.0);
+    } else if (this.smoothedBeta > this.tiltWalkDeadzoneDeg + 4.0) {
+      // Tilting phone backward by > 14 degrees backs up slowly
+      const tiltExcess = this.smoothedBeta - (this.tiltWalkDeadzoneDeg + 4.0);
+      forward = Math.max(-0.6, -tiltExcess / 20.0);
     }
 
-    const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
     let strafe = 0;
-    if (Math.abs(deltaGamma) > 10) {
-      strafe = Math.min(0.7, Math.max(-0.7, Math.sign(deltaGamma) * (Math.abs(deltaGamma) - 10) / 20));
+    if (Math.abs(this.smoothedGamma) > 12.0) {
+      const excess = Math.abs(this.smoothedGamma) - 12.0;
+      strafe = Math.min(0.7, Math.max(-0.7, Math.sign(this.smoothedGamma) * (excess / 20.0)));
     }
 
     return { forward, strafe };
@@ -464,11 +500,7 @@ export class SensorManager {
 
   public getYawRad(): number {
     const degToRad = Math.PI / 180;
-    let calAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
-    // Wrap to [-180, 180]
-    while (calAlpha > 180) calAlpha -= 360;
-    while (calAlpha < -180) calAlpha += 360;
-    return -calAlpha * degToRad + this.manualEuler.yaw;
+    return -this.smoothedAlpha * degToRad * this.yawSensitivity + this.manualEuler.yaw;
   }
 
   // Virtual Joystick input state
@@ -745,44 +777,42 @@ export class SensorManager {
     audio: AudioMetrics;
     status: SensorStatus;
   } {
-    // 1. Dynamic fast lerp orientation: instant 1:1 tracking when following fast targets
-    let diffAlpha = this.rawOrientation.alpha - this.smoothedOrientation.alpha;
-    if (diffAlpha > 180) diffAlpha -= 360;
-    if (diffAlpha < -180) diffAlpha += 360;
+    // 1. Low-Pass Filter (LPF) & Deadzone applied to rotation angles (alpha, beta, gamma)
+    if (this.hasReceivedGyroData) {
+      let targetRelAlpha = this.rawOrientation.alpha - this.zeroAlpha;
+      while (targetRelAlpha > 180) targetRelAlpha -= 360;
+      while (targetRelAlpha < -180) targetRelAlpha += 360;
 
-    const rotDelta = Math.abs(diffAlpha) + Math.abs(this.rawOrientation.beta - this.smoothedOrientation.beta);
-    const dynamicRotLerp = Math.min(0.88, 0.45 + rotDelta * 0.04);
+      const targetRelBeta = this.rawOrientation.beta - this.zeroBeta;
+      const targetRelGamma = this.rawOrientation.gamma - this.zeroGamma;
 
-    this.smoothedOrientation.alpha += diffAlpha * dynamicRotLerp;
-    if (this.smoothedOrientation.alpha < 0) this.smoothedOrientation.alpha += 360;
-    if (this.smoothedOrientation.alpha >= 360) this.smoothedOrientation.alpha -= 360;
+      // Angular deadzone check: reject hand tremor & micro-vibrations
+      const dAlpha = targetRelAlpha - this.smoothedAlpha;
+      if (Math.abs(dAlpha) > this.angularDeadzoneDeg) {
+        this.smoothedAlpha += dAlpha * this.rotationDamping;
+      }
 
-    this.smoothedOrientation.beta += (this.rawOrientation.beta - this.smoothedOrientation.beta) * dynamicRotLerp;
-    this.smoothedOrientation.gamma += (this.rawOrientation.gamma - this.smoothedOrientation.gamma) * dynamicRotLerp;
+      const dBeta = targetRelBeta - this.smoothedBeta;
+      if (Math.abs(dBeta) > this.angularDeadzoneDeg) {
+        this.smoothedBeta += dBeta * this.rotationDamping;
+      }
 
-    // Convert to Radians
+      const dGamma = targetRelGamma - this.smoothedGamma;
+      if (Math.abs(dGamma) > this.angularDeadzoneDeg) {
+        this.smoothedGamma += dGamma * this.rotationDamping;
+      }
+    }
+
+    // Convert smoothed angles to Radians with 1:1 proportional mapping
     const degToRad = Math.PI / 180;
     let yawRad: number;
     let pitchRad: number;
     let rollRad: number;
 
     if (this.hasReceivedGyroData) {
-      // 1:1 yaw mapping relative to calibrated orientation
-      let deltaAlpha = this.smoothedOrientation.alpha - (this.initialAlphaOffset || 0);
-      while (deltaAlpha > 180) deltaAlpha -= 360;
-      while (deltaAlpha < -180) deltaAlpha += 360;
-      yawRad = -deltaAlpha * degToRad + this.manualEuler.yaw;
-
-      // 1:1 pitch mapping relative to calibrated resting beta angle
-      const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
-      pitchRad = Math.max(-1.42, Math.min(1.42, deltaBeta * degToRad + this.manualEuler.pitch));
-
-      // Subtle roll relative to calibrated gamma
-      const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
-      rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
-
-      // Note: Automatic tilt-to-walk simulation removed to prevent unwanted phantom camera displacement in the prairie.
-      // Physical movement is strictly commanded by intentional user controls.
+      yawRad = -this.smoothedAlpha * degToRad * this.yawSensitivity + this.manualEuler.yaw;
+      pitchRad = Math.max(-1.42, Math.min(1.42, this.smoothedBeta * degToRad * this.pitchSensitivity + this.manualEuler.pitch));
+      rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.25));
     } else {
       yawRad = this.manualEuler.yaw;
       pitchRad = this.manualEuler.pitch;
@@ -828,9 +858,9 @@ export class SensorManager {
 
     return {
       orientation: {
-        alpha: this.smoothedOrientation.alpha,
-        beta: this.smoothedOrientation.beta,
-        gamma: this.smoothedOrientation.gamma,
+        alpha: (this.smoothedAlpha + this.zeroAlpha + 360) % 360,
+        beta: this.smoothedBeta + this.zeroBeta,
+        gamma: this.smoothedGamma + this.zeroGamma,
         yawRad,
         pitchRad,
         rollRad,
@@ -854,16 +884,14 @@ export class SensorManager {
   } {
     const degToRad = Math.PI / 180;
     const yawRad = this.getYawRad();
-    const deltaBeta = this.smoothedOrientation.beta - (this.calibratedBeta || 65);
-    const pitchRad = Math.max(-1.42, Math.min(1.42, deltaBeta * degToRad + this.manualEuler.pitch));
-    const deltaGamma = this.smoothedOrientation.gamma - (this.calibratedGamma || 0);
-    const rollRad = Math.max(-0.35, Math.min(0.35, -deltaGamma * degToRad * 0.25));
+    const pitchRad = Math.max(-1.42, Math.min(1.42, this.smoothedBeta * degToRad * this.pitchSensitivity + this.manualEuler.pitch));
+    const rollRad = Math.max(-0.35, Math.min(0.35, -this.smoothedGamma * degToRad * 0.25));
 
     return {
       orientation: {
-        alpha: this.smoothedOrientation.alpha,
-        beta: this.smoothedOrientation.beta,
-        gamma: this.smoothedOrientation.gamma,
+        alpha: (this.smoothedAlpha + this.zeroAlpha + 360) % 360,
+        beta: this.smoothedBeta + this.zeroBeta,
+        gamma: this.smoothedGamma + this.zeroGamma,
         yawRad,
         pitchRad,
         rollRad,

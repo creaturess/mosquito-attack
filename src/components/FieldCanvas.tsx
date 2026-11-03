@@ -179,12 +179,14 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
   // Manual look rotation offsets (mouse look on desktop only)
   const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
 
-  // Explicit Mobile Gyroscope status & prompt
+  // Explicit Mobile Gyroscope status, zero-point calibration, and activation state
   const [showGyroPrompt, setShowGyroPrompt] = useState(false);
   const [isGyroActive, setIsGyroActive] = useState(false);
+  const [hasStartedExploration, setHasStartedExploration] = useState(false);
+  const [calibrationNotice, setCalibrationNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if iOS Safari requires explicit permission prompt
+    // Check if iOS Safari or mobile requires explicit permission prompt
     if (typeof window !== 'undefined') {
       const win = window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } };
       if (typeof win.DeviceOrientationEvent?.requestPermission === 'function' && !sensorManager.hasGyroData()) {
@@ -193,24 +195,35 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
     }
   }, []);
 
-  const handleRequestGyroExplicit = async () => {
+  const handleStartExploration = async () => {
     const granted = await sensorManager.requestGyroscope();
-    if (granted) {
-      setShowGyroPrompt(false);
-      setIsGyroActive(true);
-    }
+    sensorManager.calibrateZeroPoint();
+    manualLookRef.current = { yaw: 0, pitch: 0 };
+    setHasStartedExploration(true);
+    setIsGyroActive(granted || sensorManager.hasGyroData());
+    setShowGyroPrompt(false);
+    setCalibrationNotice('¡Punto Cero Calibrado y Sensores Activos!');
+    sensorManager.triggerHaptic('swat');
+    setTimeout(() => {
+      setCalibrationNotice(null);
+    }, 2000);
   };
 
   const handleCalibrateCenter = () => {
-    sensorManager.calibrateCenter();
+    sensorManager.calibrateZeroPoint();
     manualLookRef.current = { yaw: 0, pitch: 0 };
+    setCalibrationNotice('¡Punto Cero Calibrado!');
+    sensorManager.triggerHaptic('swat');
+    setTimeout(() => {
+      setCalibrationNotice(null);
+    }, 1800);
   };
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current || !bladeCanvasRef.current) return;
 
-    // Calibrate sensor center when entering Field Mode
-    sensorManager.calibrateCenter();
+    // Calibrate sensor zero point when entering Field Mode
+    sensorManager.calibrateZeroPoint();
 
     const width = containerRef.current.clientWidth || window.innerWidth;
     const height = containerRef.current.clientHeight || window.innerHeight;
@@ -716,7 +729,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       // Camera orientation depends strictly and exclusively on DeviceOrientationEvent
       // Invert yaw so turning camera to the right turns the 3D world to the right
       if (hasGyro) {
-        player.yaw = -orientation.yawRad;
+        player.yaw = orientation.yawRad;
         player.pitch = orientation.pitchRad;
         player.roll = orientation.rollRad;
       } else {
@@ -1066,27 +1079,49 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         }}
       />
 
-      {/* Explicit Mobile Gyroscope Permission Prompt (iOS Safari) */}
-      {showGyroPrompt && (
-        <button
-          data-no-swat="true"
-          onClick={handleRequestGyroExplicit}
-          className="absolute top-28 right-3.5 z-40 flex items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-700 to-red-700 px-4 py-2.5 text-xs font-black text-white shadow-2xl backdrop-blur-md active:scale-95 animate-pulse"
-          style={{ transform: 'translate3d(0, 0, 0)' }}
-        >
-          <span className="text-sm">🧭</span>
-          <span>ACTIVAR GIROSCOPIO</span>
-        </button>
+      {/* Initial Exploration & Gyroscope Activation Modal for Mobile Devices */}
+      {!hasStartedExploration && !sensorManager.hasGyroData() && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-3xl border-2 border-emerald-500/50 bg-stone-950 p-6 text-center text-white shadow-2xl shadow-emerald-950/60">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-950/60 text-3xl">
+              🧭
+            </div>
+            <h3 className="text-xl font-black text-emerald-400 uppercase tracking-wide">
+              Control por Giroscopio
+            </h3>
+            <p className="mt-2 text-xs leading-relaxed text-stone-300">
+              Sostené el celular frente a ti en una postura cómoda y presioná el botón para calibrar el punto cero e iniciar la exploración 360°.
+            </p>
+            <button
+              data-no-swat="true"
+              onClick={handleStartExploration}
+              className="mt-5 w-full rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-600 to-green-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-900/50 active:scale-95 transition"
+            >
+              ACTIVAR SENSORES E INICIAR
+            </button>
+          </div>
+        </div>
       )}
 
-      {/* Gyroscope Recenter / Status Button */}
+      {/* Floating Zero-Point Calibration Toast Notification */}
+      {calibrationNotice && (
+        <div
+          className="pointer-events-none absolute top-28 left-1/2 -translate-x-1/2 z-40 rounded-full border border-emerald-400 bg-emerald-950/95 px-4 py-1.5 text-xs font-bold text-emerald-200 shadow-xl backdrop-blur-md transition-all duration-300"
+          style={{ transform: 'translate3d(-50%, 0, 0)' }}
+        >
+          <span>{calibrationNotice}</span>
+        </div>
+      )}
+
+      {/* Gyroscope Zero-Point Calibration Button */}
       <button
         data-no-swat="true"
         onClick={handleCalibrateCenter}
-        className="absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/70 px-3 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-md active:scale-95 transition hover:bg-black/90"
+        className="absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/50 bg-black/75 px-3.5 py-1.5 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-lg active:scale-95 transition hover:bg-black/90"
         style={{ transform: 'translate3d(0, 0, 0)' }}
       >
-        <span>🧭 {isGyroActive || sensorManager.hasGyroData() ? 'Giroscopio Activo • Recentrar' : 'Recentrar'}</span>
+        <span>🎯 Calibrar Punto Cero</span>
+        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
       </button>
 
       {/* PC Controls Hint Badge */}
