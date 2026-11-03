@@ -130,7 +130,18 @@ const _worldPos = new THREE.Vector3();
 const _proj = new THREE.Vector3();
 const _sliceScale = new THREE.Vector3();
 
-export const FieldCanvas: React.FC<FieldCanvasProps> = ({
+// Persistent reusable pool for mosquito screen targets (zero allocation in render loop)
+const _screenTargetsPool: MosquitoScreenTarget[] = Array.from({ length: 30 }, () => ({
+  id: '',
+  screenX: 0,
+  screenY: 0,
+  radiusPx: 0,
+  isDead: false,
+  userData: null,
+}));
+let _screenTargetsCount = 0;
+
+export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
   gameState,
   onKill,
   onLevelComplete,
@@ -785,7 +796,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
       }
 
       // 4. Update Mosquitos & 3D Spatial Audio
-      const screenTargets: MosquitoScreenTarget[] = [];
+      _screenTargetsCount = 0;
       _camQuatInv.copy(camera.quaternion).invert();
 
       for (let i = mosquitoes.length - 1; i >= 0; i--) {
@@ -810,24 +821,25 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         _proj.copy(_worldPos).project(camera);
 
         if (_proj.z <= 1.0) {
-          const screenX = ((_proj.x + 1) * width) / 2;
-          const screenY = ((-_proj.y + 1) * height) / 2;
+          const screenX = ((_proj.x + 1) * width) * 0.5;
+          const screenY = ((-_proj.y + 1) * height) * 0.5;
           const distToCam = _worldPos.distanceTo(camera.position);
           const screenRadius = Math.max(45, Math.min(200, (width * (mosq.isBoss ? 1.5 : 0.55)) / Math.max(1, distToCam)));
 
-          screenTargets.push({
-            id: mosq.id,
-            screenX,
-            screenY,
-            radiusPx: screenRadius,
-            isDead: mosq.isDead,
-            userData: mosq,
-          });
+          if (_screenTargetsCount < _screenTargetsPool.length) {
+            const t = _screenTargetsPool[_screenTargetsCount++];
+            t.id = mosq.id;
+            t.screenX = screenX;
+            t.screenY = screenY;
+            t.radiusPx = screenRadius;
+            t.isDead = mosq.isDead;
+            t.userData = mosq;
+          }
         }
       }
 
-      // 5. Check Fruit Ninja Blade Intersections
-      const sliceHits = bladeDetector.checkIntersections(screenTargets);
+      // 5. Check Fruit Ninja Blade Intersections (Zero allocation, passing pre-allocated pool + count)
+      const sliceHits = bladeDetector.checkIntersections(_screenTargetsPool, _screenTargetsCount);
       for (const hit of sliceHits) {
         const targetMosq = mosquitoes.find((m) => m.id === hit.targetId);
         if (targetMosq && !targetMosq.isDead && !targetMosq.isBoss) {
@@ -965,15 +977,33 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     <div
       ref={containerRef}
       className="relative h-full w-full select-none overflow-hidden touch-none"
-      style={{ touchAction: 'none' }}
+      style={{
+        touchAction: 'none',
+        transform: 'translate3d(0, 0, 0)',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+      }}
     >
-      {/* 3D WebGL Canvas */}
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full block" />
+      {/* 3D WebGL Canvas with Hardware Acceleration */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full block"
+        style={{
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
+      />
 
-      {/* Fruit Ninja Blade Slash Canvas */}
+      {/* Fruit Ninja Blade Slash Canvas with Hardware Acceleration */}
       <canvas
         ref={bladeCanvasRef}
         className="pointer-events-none absolute inset-0 z-10 h-full w-full block"
+        style={{
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
       />
 
       {/* Explicit Mobile Gyroscope Permission Prompt (iOS Safari) */}
@@ -982,6 +1012,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
           data-no-swat="true"
           onClick={handleRequestGyroExplicit}
           className="absolute top-28 right-3.5 z-40 flex items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-700 to-red-700 px-4 py-2.5 text-xs font-black text-white shadow-2xl backdrop-blur-md active:scale-95 animate-pulse"
+          style={{ transform: 'translate3d(0, 0, 0)' }}
         >
           <span className="text-sm">🧭</span>
           <span>ACTIVAR GIROSCOPIO</span>
@@ -993,12 +1024,16 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         data-no-swat="true"
         onClick={handleCalibrateCenter}
         className="absolute top-16 right-3.5 z-30 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/70 px-3 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-md shadow-md active:scale-95 transition hover:bg-black/90"
+        style={{ transform: 'translate3d(0, 0, 0)' }}
       >
         <span>🧭 {isGyroActive || sensorManager.hasGyroData() ? 'Giroscopio Activo • Recentrar' : 'Recentrar'}</span>
       </button>
 
       {/* PC Controls Hint Badge */}
-      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/40 bg-black/60 px-4 py-1.5 backdrop-blur-md text-xs font-semibold text-emerald-200">
+      <div
+        className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/40 bg-black/60 px-4 py-1.5 backdrop-blur-md text-xs font-semibold text-emerald-200"
+        style={{ transform: 'translate3d(-50%, 0, 0)' }}
+      >
         <span>🏃 WASD / Flechas para caminar</span>
         <span className="text-emerald-500">•</span>
         <span>🧭 Giroscopio (móvil) / Mouse para mirar</span>
@@ -1012,6 +1047,7 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
           data-no-swat="true"
           onClick={onReturnToMenu}
           className="absolute top-16 left-3.5 z-30 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-xs font-bold text-white shadow-lg backdrop-blur-md active:scale-95 transition hover:bg-black/85"
+          style={{ transform: 'translate3d(0, 0, 0)' }}
         >
           <span>← Salir al Menú</span>
         </button>
@@ -1025,12 +1061,14 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
         onTouchEnd={handleJoystickTouchEnd}
         onTouchCancel={handleJoystickTouchEnd}
         className="sm:hidden absolute bottom-8 left-6 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/40 bg-black/50 backdrop-blur-sm shadow-xl active:border-emerald-400/70"
+        style={{ transform: 'translate3d(0, 0, 0)' }}
       >
         <div className="h-14 w-14 rounded-full border border-emerald-500/30 bg-emerald-950/40 flex items-center justify-center">
           <div
             className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500 to-emerald-400 shadow-lg border-2 border-white/80 transition-transform duration-75"
             style={{
-              transform: `translate(${joystickThumb.x}px, ${joystickThumb.y}px)`,
+              transform: `translate3d(${joystickThumb.x}px, ${joystickThumb.y}px, 0)`,
+              willChange: 'transform',
             }}
           />
         </div>
@@ -1038,3 +1076,11 @@ export const FieldCanvas: React.FC<FieldCanvasProps> = ({
     </div>
   );
 };
+
+export const FieldCanvas = React.memo<FieldCanvasProps>(
+  FieldCanvasComponent,
+  (prev, next) =>
+    prev.gameState.currentLevel === next.gameState.currentLevel &&
+    prev.gameState.targetKills === next.gameState.targetKills &&
+    prev.gameState.isPlaying === next.gameState.isPlaying
+);

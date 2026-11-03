@@ -21,10 +21,12 @@ export interface FieldMosquitoOptions {
   level?: 1 | 2 | 3;
 }
 
-interface TrailPoint {
-  position: THREE.Vector3;
-  timestamp: number;
-}
+// Reusable scratch vectors to completely prevent GC thrashing and frame drops during flight loop
+const _prevPos = new THREE.Vector3();
+const _toPlayer = new THREE.Vector3();
+const _targetPoint = new THREE.Vector3();
+const _desiredDir = new THREE.Vector3();
+const _moveStep = new THREE.Vector3();
 
 export class FieldMosquito {
   public id: string;
@@ -42,7 +44,6 @@ export class FieldMosquito {
 
   // Motion Trail
   public trailLine: THREE.Line;
-  private trailPoints: TrailPoint[] = [];
   private trailPositionsArray: Float32Array;
 
   // Flight dynamics
@@ -204,21 +205,19 @@ export class FieldMosquito {
       this.gltfRightWing.rotation.z = -flap;
     }
 
-    const prevPos = this.group.position.clone();
+    _prevPos.copy(this.group.position);
 
-    // Flight target computation
-    const toPlayer = playerPos.clone().sub(this.group.position);
-    const distToPlayer = toPlayer.length();
-
-    let targetPoint: THREE.Vector3;
+    // Flight target computation using scratch vectors
+    _toPlayer.copy(playerPos).sub(this.group.position);
+    const distToPlayer = _toPlayer.length();
 
     if (this.isApproaching) {
       // Phase 1: Flying in smoothly from afar towards the player
-      targetPoint = playerPos.clone().add(new THREE.Vector3(
-        Math.cos(this.orbitAngle) * this.orbitRadius,
-        1.2 + this.orbitHeightOffset,
-        Math.sin(this.orbitAngle) * this.orbitRadius
-      ));
+      _targetPoint.set(
+        playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius,
+        playerPos.y + 1.2 + this.orbitHeightOffset,
+        playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius
+      );
 
       if (distToPlayer <= this.orbitRadius + 1.2) {
         this.isApproaching = false;
@@ -230,7 +229,7 @@ export class FieldMosquito {
       const targetZ = playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
       const targetY = playerPos.y + 0.3 + Math.sin(time * 2.2) * 0.8 + this.orbitHeightOffset;
 
-      targetPoint = new THREE.Vector3(targetX, targetY, targetZ);
+      _targetPoint.set(targetX, targetY, targetZ);
 
       // If player moved away (> 5.5m), fly back towards player immediately
       if (distToPlayer > 5.5) {
@@ -255,18 +254,18 @@ export class FieldMosquito {
       }
     }
 
-    targetPoint.add(this.dartOffset);
+    _targetPoint.add(this.dartOffset);
 
     // Steer towards target point
-    const desiredDir = targetPoint.clone().sub(this.group.position);
-    const desiredDist = desiredDir.length();
+    _desiredDir.copy(_targetPoint).sub(this.group.position);
+    const desiredDist = _desiredDir.length();
     if (desiredDist > 0.05) {
-      desiredDir.normalize();
+      _desiredDir.normalize();
       const speed = this.isApproaching
         ? this.baseSpeed * (this.isBoss ? 1.1 : 1.3)
         : this.baseSpeed * (0.8 + Math.sin(time * 3) * 0.2);
 
-      this.flightVelocity.lerp(desiredDir.multiplyScalar(speed), delta * 4.5);
+      this.flightVelocity.lerp(_desiredDir.multiplyScalar(speed), delta * 4.5);
     }
 
     // Micro buzz flutter
@@ -292,20 +291,20 @@ export class FieldMosquito {
     }
 
     // Upright heading orientation (look towards movement direction)
-    const moveStep = this.group.position.clone().sub(prevPos);
-    if (moveStep.lengthSq() > 0.0001) {
-      const heading = Math.atan2(moveStep.x, moveStep.z);
+    _moveStep.copy(this.group.position).sub(_prevPos);
+    if (_moveStep.lengthSq() > 0.0001) {
+      const heading = Math.atan2(_moveStep.x, _moveStep.z);
       this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, heading, delta * 7.0);
 
-      const horizontalSpeed = Math.hypot(moveStep.x, moveStep.z);
-      const pitchTarget = Math.atan2(moveStep.y, Math.max(0.05, horizontalSpeed));
+      const horizontalSpeed = Math.hypot(_moveStep.x, _moveStep.z);
+      const pitchTarget = Math.atan2(_moveStep.y, Math.max(0.05, horizontalSpeed));
       this.currentPitch = THREE.MathUtils.lerp(
         this.currentPitch,
         THREE.MathUtils.clamp(pitchTarget, -0.4, 0.4),
         delta * 6.0
       );
 
-      const rollTarget = -moveStep.x * 0.35;
+      const rollTarget = -_moveStep.x * 0.35;
       this.currentRoll = THREE.MathUtils.lerp(
         this.currentRoll,
         THREE.MathUtils.clamp(rollTarget, -0.35, 0.35),
@@ -323,32 +322,20 @@ export class FieldMosquito {
   }
 
   private updateTrail() {
-    const now = performance.now();
-    this.trailPoints.unshift({
-      position: this.group.position.clone(),
-      timestamp: now,
-    });
-
-    while (this.trailPoints.length > 10) {
-      this.trailPoints.pop();
+    const arr = this.trailPositionsArray;
+    // In-place typed array shift: ZERO object allocations
+    for (let i = 11; i > 0; i--) {
+      const src = (i - 1) * 3;
+      const dst = i * 3;
+      arr[dst] = arr[src];
+      arr[dst + 1] = arr[src + 1];
+      arr[dst + 2] = arr[src + 2];
     }
+    arr[0] = this.group.position.x;
+    arr[1] = this.group.position.y;
+    arr[2] = this.group.position.z;
 
     const posAttr = this.trailLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const arr = posAttr.array as Float32Array;
-
-    for (let i = 0; i < 10; i++) {
-      if (i < this.trailPoints.length) {
-        const pt = this.trailPoints[i].position;
-        arr[i * 3 + 0] = pt.x;
-        arr[i * 3 + 1] = pt.y;
-        arr[i * 3 + 2] = pt.z;
-      } else if (this.trailPoints.length > 0) {
-        const last = this.trailPoints[this.trailPoints.length - 1].position;
-        arr[i * 3 + 0] = last.x;
-        arr[i * 3 + 1] = last.y;
-        arr[i * 3 + 2] = last.z;
-      }
-    }
     posAttr.needsUpdate = true;
   }
 

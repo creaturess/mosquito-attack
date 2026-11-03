@@ -63,6 +63,10 @@ export class BladeSwipeDetector {
     this.ctx = canvas.getContext('2d');
   }
 
+  private pointPool: { x: number; y: number; time: number }[] = Array.from({ length: 160 }, () => ({ x: 0, y: 0, time: 0 }));
+  private pointPoolIdx: number = 0;
+  private hitsResult: SliceHitResult[] = [];
+
   public resize(width: number, height: number) {
     this.canvas.width = width;
     this.canvas.height = height;
@@ -70,14 +74,19 @@ export class BladeSwipeDetector {
 
   public addPoint(x: number, y: number) {
     const now = performance.now();
-    this.points.push({ x, y, time: now });
+    const pt = this.pointPool[this.pointPoolIdx];
+    this.pointPoolIdx = (this.pointPoolIdx + 1) % this.pointPool.length;
+    pt.x = x;
+    pt.y = y;
+    pt.time = now;
+    this.points.push(pt);
   }
 
   public endStroke() {}
 
-  public checkIntersections(targets: MosquitoScreenTarget[]): SliceHitResult[] {
-    const hits: SliceHitResult[] = [];
-    if (this.points.length < 2) return hits;
+  public checkIntersections(targets: MosquitoScreenTarget[], count?: number): SliceHitResult[] {
+    this.hitsResult.length = 0;
+    if (this.points.length < 2) return this.hitsResult;
 
     const p2 = this.points[this.points.length - 1];
     const p1 = this.points[this.points.length - 2];
@@ -85,16 +94,18 @@ export class BladeSwipeDetector {
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const len = Math.hypot(dx, dy);
-    if (len < this.minSegmentLength) return hits;
+    if (len < this.minSegmentLength) return this.hitsResult;
 
     const dt = Math.max((p2.time - p1.time) / 1000, 0.001);
     const speed = len / dt;
 
-    if (speed < this.minSwipeSpeed) return hits;
+    if (speed < this.minSwipeSpeed) return this.hitsResult;
 
     const lenSq = len * len;
+    const targetCount = count !== undefined ? count : targets.length;
 
-    for (const target of targets) {
+    for (let i = 0; i < targetCount; i++) {
+      const target = targets[i];
       if (target.isDead) continue;
 
       const cx = target.screenX;
@@ -110,7 +121,7 @@ export class BladeSwipeDetector {
       const distSq = (cx - qx) * (cx - qx) + (cy - qy) * (cy - qy);
 
       if (distSq <= radius * radius) {
-        hits.push({
+        this.hitsResult.push({
           targetId: target.id,
           p1: { x: p1.x, y: p1.y },
           p2: { x: p2.x, y: p2.y },
@@ -119,7 +130,7 @@ export class BladeSwipeDetector {
       }
     }
 
-    return hits;
+    return this.hitsResult;
   }
 
   private hasDrawn: boolean = false;
@@ -129,7 +140,14 @@ export class BladeSwipeDetector {
     const ctx = this.ctx;
     const now = performance.now();
 
-    this.points = this.points.filter((pt) => now - pt.time <= this.trailLifetimeMs);
+    // In-place prune expired points without allocating new arrays
+    let writeIdx = 0;
+    for (let i = 0; i < this.points.length; i++) {
+      if (now - this.points[i].time <= this.trailLifetimeMs) {
+        this.points[writeIdx++] = this.points[i];
+      }
+    }
+    this.points.length = writeIdx;
 
     if (this.points.length === 0) {
       if (this.hasDrawn) {
@@ -213,10 +231,20 @@ export interface SliceParams {
   swipeSpeed: number;
 }
 
+interface ActiveBurst {
+  pSystem: THREE.Points;
+  geom: THREE.BufferGeometry;
+  mat: THREE.PointsMaterial;
+  velocities: THREE.Vector3[];
+  age: number;
+  duration: number;
+}
+
 export class MosquitoSliceManager {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private activeHalves: SlicedHalf[] = [];
+  private activeBursts: ActiveBurst[] = [];
   private particleGroup: THREE.Group;
 
   public separationForce: number = 2.4;
@@ -377,38 +405,18 @@ export class MosquitoSliceManager {
     const pSystem = new THREE.Points(geom, mat);
     this.particleGroup.add(pSystem);
 
-    let age = 0;
-    const duration = 0.55;
-
-    const animateParticles = () => {
-      age += 0.016;
-      if (age > duration) {
-        this.particleGroup.remove(pSystem);
-        geom.dispose();
-        mat.dispose();
-        return;
-      }
-
-      const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
-      const arr = posAttr.array as Float32Array;
-
-      for (let i = 0; i < count; i++) {
-        const vel = velocities[i];
-        vel.y -= 9.8 * 0.016;
-        arr[i * 3 + 0] += vel.x * 0.016;
-        arr[i * 3 + 1] += vel.y * 0.016;
-        arr[i * 3 + 2] += vel.z * 0.016;
-      }
-      posAttr.needsUpdate = true;
-      mat.opacity = 0.9 * (1.0 - age / duration);
-
-      requestAnimationFrame(animateParticles);
-    };
-
-    requestAnimationFrame(animateParticles);
+    this.activeBursts.push({
+      pSystem,
+      geom,
+      mat,
+      velocities,
+      age: 0,
+      duration: 0.55,
+    });
   }
 
   public update(delta: number) {
+    // 1. Update active sliced insect halves
     for (let i = this.activeHalves.length - 1; i >= 0; i--) {
       const half = this.activeHalves[i];
       half.age += delta;
@@ -437,6 +445,33 @@ export class MosquitoSliceManager {
         });
       }
     }
+
+    // 2. Update particle bursts synchronously with delta time
+    for (let i = this.activeBursts.length - 1; i >= 0; i--) {
+      const burst = this.activeBursts[i];
+      burst.age += delta;
+
+      if (burst.age >= burst.duration) {
+        this.particleGroup.remove(burst.pSystem);
+        burst.geom.dispose();
+        burst.mat.dispose();
+        this.activeBursts.splice(i, 1);
+        continue;
+      }
+
+      const posAttr = burst.geom.getAttribute('position') as THREE.BufferAttribute;
+      const arr = posAttr.array as Float32Array;
+
+      for (let j = 0; j < burst.velocities.length; j++) {
+        const vel = burst.velocities[j];
+        vel.y -= 9.8 * delta;
+        arr[j * 3 + 0] += vel.x * delta;
+        arr[j * 3 + 1] += vel.y * delta;
+        arr[j * 3 + 2] += vel.z * delta;
+      }
+      posAttr.needsUpdate = true;
+      burst.mat.opacity = 0.9 * (1.0 - burst.age / burst.duration);
+    }
   }
 
   public clearAll() {
@@ -445,6 +480,13 @@ export class MosquitoSliceManager {
       half.materials.forEach((m) => m.dispose());
     });
     this.activeHalves = [];
+
+    this.activeBursts.forEach((burst) => {
+      this.particleGroup.remove(burst.pSystem);
+      burst.geom.dispose();
+      burst.mat.dispose();
+    });
+    this.activeBursts = [];
 
     while (this.particleGroup.children.length > 0) {
       const child = this.particleGroup.children[0];
@@ -510,7 +552,7 @@ interface ThreeCanvasProps {
   onDebugUpdate?: (nests: DebugNestInfo[]) => void;
 }
 
-export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
+const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
   gameState,
   onKill,
   onLevelComplete,
@@ -1311,18 +1353,42 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     <div
       ref={containerRef}
       className="absolute inset-0 h-full w-full overflow-hidden touch-none select-none"
-      style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+      style={{
+        touchAction: 'none',
+        overscrollBehavior: 'none',
+        transform: 'translate3d(0, 0, 0)',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+      }}
     >
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full touch-none select-none"
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction: 'none',
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
       />
       <canvas
         ref={bladeCanvasRef}
         className="absolute inset-0 h-full w-full pointer-events-none touch-none select-none"
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction: 'none',
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
       />
     </div>
   );
 };
+
+export const ThreeCanvas = React.memo<ThreeCanvasProps>(
+  ThreeCanvasComponent,
+  (prev, next) =>
+    prev.gameState.currentLevel === next.gameState.currentLevel &&
+    prev.gameState.targetKills === next.gameState.targetKills &&
+    prev.gameState.isPlaying === next.gameState.isPlaying
+);

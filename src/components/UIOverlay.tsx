@@ -48,7 +48,10 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
     : 'border-emerald-500/40 shadow-emerald-950/40';
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3.5 select-none">
+    <div
+      className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-3.5 select-none"
+      style={{ transform: 'translate3d(0, 0, 0)', backfaceVisibility: 'hidden', willChange: 'transform' }}
+    >
       {/* --- TOP ROW: KILL COUNTER (LEFT) & TIMER (RIGHT) --- */}
       <div className="flex items-center justify-between w-full">
         {/* Left: Kill Counter */}
@@ -69,9 +72,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
         {gameState.currentLevel === 3 && (
           <div className="w-28 h-2.5 rounded-full bg-black/80 border-2 border-emerald-500/40 overflow-hidden shadow-lg shadow-emerald-950/40">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-red-600 transition-all duration-100"
+              className="h-full origin-left bg-gradient-to-r from-emerald-500 via-emerald-400 to-red-600 transition-transform duration-100"
               style={{
-                width: `${Math.min(100, (gameState.screamSecondsAccumulated / 10) * 100)}%`,
+                width: '100%',
+                transform: `scaleX(${Math.min(1, gameState.screamSecondsAccumulated / 10)}) translateZ(0)`,
+                willChange: 'transform',
               }}
             />
           </div>

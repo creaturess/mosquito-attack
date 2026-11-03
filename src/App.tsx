@@ -103,27 +103,32 @@ export default function App() {
     }
   }, [cameraStream, gameMode]);
 
-  // Countdown timer effect
+  // Countdown timer effect synchronized strictly with requestAnimationFrame and monitor refresh rate
   useEffect(() => {
-    if (gameState.isPlaying && gameState.timeLeft > 0) {
-      timerIntervalRef.current = window.setInterval(() => {
+    if (!gameState.isPlaying || gameState.timeLeft <= 0) return;
+
+    let animId: number;
+    let lastSecondTime = performance.now();
+
+    const timerTick = (now: number) => {
+      animId = requestAnimationFrame(timerTick);
+      if (now - lastSecondTime >= 1000) {
+        lastSecondTime = now;
         setGameState((prev) => {
           if (!prev.isPlaying) return prev;
           if (prev.timeLeft <= 1) {
-            // Time ran out!
-            clearInterval(timerIntervalRef.current!);
+            cancelAnimationFrame(animId);
             handleTimeOver(prev);
             return { ...prev, timeLeft: 0, isPlaying: false };
           }
           return { ...prev, timeLeft: prev.timeLeft - 1 };
         });
-      }, 1000);
-    }
-
-    return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
       }
+    };
+
+    animId = requestAnimationFrame(timerTick);
+    return () => {
+      cancelAnimationFrame(animId);
     };
   }, [gameState.isPlaying, gameState.currentLevel]);
 
@@ -269,7 +274,13 @@ export default function App() {
   return (
     <div
       className="relative h-full w-full select-none overflow-hidden bg-black font-sans touch-none"
-      style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+      style={{
+        touchAction: 'none',
+        overscrollBehavior: 'none',
+        transform: 'translate3d(0, 0, 0)',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+      }}
     >
       {/* --- MODE 1: JUGAR CON CÁMARA (Original AR Mode, 100% Unchanged) --- */}
       {gameMode === 'camera' && (
