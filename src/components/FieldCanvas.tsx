@@ -1261,7 +1261,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         </button>
       )}
 
-      {/* Tactile Virtual Joystick for Traversing the Field (Positioned on the RIGHT side for mobile) */}
+      {/* Tactile Virtual Joystick for Traversing the Field (Positioned in the BOTTOM-CENTER for mobile) */}
       {!isComputer && (
         <div
           data-no-swat="true"
@@ -1269,8 +1269,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
           onTouchMove={handleJoystickTouchMove}
           onTouchEnd={handleJoystickTouchEnd}
           onTouchCancel={handleJoystickTouchEnd}
-          className="absolute bottom-6 right-5 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
-          style={{ transform: 'translate3d(0, 0, 0)' }}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
+          style={{ transform: 'translate3d(-50%, 0, 0)' }}
         >
           <span className="absolute top-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▲</span>
           <span className="absolute bottom-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▼</span>
