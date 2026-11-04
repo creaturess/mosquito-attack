@@ -181,6 +181,20 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
   // Manual look rotation offsets (mouse look on desktop only)
   const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
 
+  // Detect computer/desktop with mouse to hide tactile joystick on PC
+  const [isComputer, setIsComputer] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const handler = (e: MediaQueryListEvent) => setIsComputer(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   // Explicit Mobile Gyroscope status, zero-point calibration, and activation state
   const [showGyroPrompt, setShowGyroPrompt] = useState(false);
   const [isGyroActive, setIsGyroActive] = useState(false);
@@ -659,23 +673,36 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('mouseleave', handleMouseLeave);
 
-    // --- 10. Fruit Ninja Blade Swipe Handling (Swiping ONLY cuts mosquitoes, never moves the stage) ---
+    // --- 10. Fruit Ninja Blade Swipe Handling (Swiping cuts mosquitoes with touch) ---
     const handleTouchStart = (e: TouchEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl && targetEl.closest('[data-no-swat="true"]')) return;
+
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
+        if (touch.identifier === joystickTouchIdRef.current) continue;
         bladeDetector.addPoint(touch.clientX, touch.clientY);
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl && targetEl.closest('[data-no-swat="true"]')) return;
+
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
+        if (touch.identifier === joystickTouchIdRef.current) continue;
         bladeDetector.addPoint(touch.clientX, touch.clientY);
       }
     };
 
-    const handleTouchEnd = () => {
-      bladeDetector.endStroke();
+    const handleTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier !== joystickTouchIdRef.current) {
+          bladeDetector.endStroke();
+        }
+      }
     };
 
     containerEl.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -777,7 +804,8 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       // 2. Horizontal Right Vector (strictly orthogonal to horizontal forward)
       _rightDir.set(-_forwardDir.z, 0, _forwardDir.x);
 
-      // CONTROLS: Complete Hybrid Navigation with Unified Local Camera Coordinate System
+      // CONTROLS: 100% Tactile Traversal (Touch Joystick on mobile + WASD on keyboard)
+      // The camera rotates with the phone's gyroscope, but phone physical displacement is disabled
       let inputForward = 0;
       let inputRight = 0;
 
@@ -787,39 +815,22 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       if (keys.d) inputRight += 1;
       if (keys.a) inputRight -= 1;
 
-      // 2. Virtual Joystick Input (Touch Thumb on Mobile)
+      // 2. Touch Navigation: Virtual Joystick (Touch Thumb on Mobile / Tablets)
       const joyX = joystickMoveRef.current.x;
       const joyY = joystickMoveRef.current.y;
       const joyMag = Math.hypot(joyX, joyY);
 
       if (joyMag > 0.05) {
-        // Joystick takes clean authoritative precedence when touched:
         // Pushing UP (joyY < 0) advances strictly forward along camera view
         // Pushing RIGHT (joyX > 0) strafes strictly right of camera view
         inputForward += -joyY;
         inputRight += joyX;
-      } else {
-        // 3. Physical Cell Phone Movement & Tilt-to-Walk (when not actively using touch joystick)
-        const phoneTilt = sensorManager.getPhoneTiltWalk();
-        inputForward += phoneTilt.forward;
-        inputRight += phoneTilt.strafe;
       }
 
-      // 4. Physical Spatial Translation (Linear acceleration transformed to camera space)
-      const physTrans = sensorManager.getPhysicalTranslationVelocity();
-      inputForward += physTrans.forward;
-      inputRight += physTrans.strafe;
+      // NO physical displacement: phone movement rotates camera in 360°, but NEVER translates position
+      player.verticalOffset = 0;
 
-      // Vertical physical translation (raising or lowering the phone physically in real space)
-      if (physTrans.up !== 0) {
-        player.verticalOffset += physTrans.up * dt * 2.4;
-      }
-      // Natural spring return to neutral eye level when vertical physical motion stops
-      player.verticalOffset = THREE.MathUtils.lerp(player.verticalOffset, 0, dt * 3.5);
-      // Bound vertical physical offset to human reach limits (-0.8m crouch, +0.8m stretch)
-      player.verticalOffset = Math.max(-0.8, Math.min(0.8, player.verticalOffset));
-
-      // 5. Strict Vector Normalization & Uniform Speed Calculation
+      // Vector Normalization & Uniform Speed Calculation
       const inputLen = Math.hypot(inputForward, inputRight);
       if (inputLen > 0.02) {
         const speedScale = Math.min(1.0, inputLen);
@@ -839,13 +850,6 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         player.velocity.set(0, 0, 0);
       }
       player.position.addScaledVector(player.velocity, dt);
-
-      // 5. Physical Stride Impulse (discrete footsteps from pedometer, without continuous noise)
-      const stepDistMeters = sensorManager.consumePhysicalStepDisplacement();
-      if (Math.abs(stepDistMeters) > 0.25) {
-        const clampedStep = Math.sign(stepDistMeters) * Math.min(0.65, Math.abs(stepDistMeters));
-        player.position.addScaledVector(_forwardDir, clampedStep);
-      }
 
       // Clamp player within the compact meadow perimeter (radius 18.5m)
       const distFromCenter = Math.hypot(player.position.x, player.position.z);
@@ -1162,7 +1166,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
             <p className="mt-2 text-xs leading-relaxed text-stone-300">
               <strong className="text-emerald-300">En PC:</strong> <span className="text-amber-300 font-bold">Mantené presionado el click</span> para rotar la visión por el espacio. Con el <span className="text-emerald-300 font-bold">click suelto</span>, mové el mouse para rebanar y matar mosquitos.
               <br className="my-1" />
-              <strong className="text-emerald-300">En móvil:</strong> Usá el giroscopio para mirar en 360°, incliná el teléfono o usá el joystick para caminar.
+              <strong className="text-emerald-300">En móvil:</strong> Mové el teléfono para <span className="text-emerald-300 font-bold">rotar la visión en 360°</span> y usá el <span className="text-amber-300 font-bold">joystick táctil</span> para recorrer el campo. Deslizá en pantalla para rebanar mosquitos.
             </p>
             <button
               data-no-swat="true"
@@ -1210,10 +1214,10 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
 
       {/* Mobile Walking Guidance Badge */}
       <div
-        className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex sm:hidden items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/75 px-3 py-1 backdrop-blur-md text-[10px] font-semibold text-emerald-200 shadow-md text-center"
+        className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex sm:hidden items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/80 px-3.5 py-1.5 backdrop-blur-md text-[11px] font-semibold text-emerald-200 shadow-md text-center"
         style={{ transform: 'translate3d(-50%, 0, 0)' }}
       >
-        <span>🚶 Caminá, incliná el cel o usá el joystick para avanzar</span>
+        <span>🧭 Mové el celular para rotar • 🕹️ Usá el joystick táctil para caminar</span>
       </div>
 
       {/* Return to Menu Button */}
@@ -1228,26 +1232,35 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         </button>
       )}
 
-      {/* Mobile Virtual Joystick (Hybrid assist) */}
-      <div
-        data-no-swat="true"
-        onTouchStart={handleJoystickTouchStart}
-        onTouchMove={handleJoystickTouchMove}
-        onTouchEnd={handleJoystickTouchEnd}
-        onTouchCancel={handleJoystickTouchEnd}
-        className="sm:hidden absolute bottom-8 left-6 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/40 bg-black/50 backdrop-blur-sm shadow-xl active:border-emerald-400/70"
-        style={{ transform: 'translate3d(0, 0, 0)' }}
-      >
-        <div className="h-14 w-14 rounded-full border border-emerald-500/30 bg-emerald-950/40 flex items-center justify-center">
-          <div
-            className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500 to-emerald-400 shadow-lg border-2 border-white/80 transition-transform duration-75"
-            style={{
-              transform: `translate3d(${joystickThumb.x}px, ${joystickThumb.y}px, 0)`,
-              willChange: 'transform',
-            }}
-          />
+      {/* Tactile Virtual Joystick for Traversing the Field (Visible on mobile/touch, hidden on computer) */}
+      {!isComputer && (
+        <div
+          data-no-swat="true"
+          onTouchStart={handleJoystickTouchStart}
+          onTouchMove={handleJoystickTouchMove}
+          onTouchEnd={handleJoystickTouchEnd}
+          onTouchCancel={handleJoystickTouchEnd}
+          className="absolute bottom-6 left-5 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
+          style={{ transform: 'translate3d(0, 0, 0)' }}
+        >
+          <span className="absolute top-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▲</span>
+          <span className="absolute bottom-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▼</span>
+          <span className="absolute left-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">◄</span>
+          <span className="absolute right-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">►</span>
+
+          <div className="h-14 w-14 rounded-full border border-emerald-500/40 bg-emerald-950/60 flex items-center justify-center pointer-events-none">
+            <div
+              className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500 via-emerald-400 to-green-300 shadow-xl border-2 border-white/90 transition-transform duration-75 flex items-center justify-center"
+              style={{
+                transform: `translate3d(${joystickThumb.x}px, ${joystickThumb.y}px, 0)`,
+                willChange: 'transform',
+              }}
+            >
+              <span className="text-xs">🚶</span>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
