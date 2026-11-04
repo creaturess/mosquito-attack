@@ -19,6 +19,7 @@ import { BladeSwipeDetector, MosquitoSliceManager, MosquitoScreenTarget } from '
 import { buzzManager } from '../audio/SpatialBuzzManager';
 import { sensorManager } from '../sensors/SensorManager';
 import { GameState } from './ThreeCanvas';
+import { isDesktopDevice } from '../utils/deviceDetection';
 
 interface FieldCanvasProps {
   gameState: GameState;
@@ -182,17 +183,13 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
   const manualLookRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0, pitch: 0 });
 
   // Detect computer/desktop with mouse to hide tactile joystick on PC
-  const [isComputer, setIsComputer] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-  });
+  const [isComputer, setIsComputer] = useState(() => isDesktopDevice());
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
-    const handler = (e: MediaQueryListEvent) => setIsComputer(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const updateDevice = () => setIsComputer(isDesktopDevice());
+    updateDevice();
+    window.addEventListener('resize', updateDevice);
+    return () => window.removeEventListener('resize', updateDevice);
   }, []);
 
   // Explicit Mobile Gyroscope status, zero-point calibration, and activation state
@@ -896,17 +893,20 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         dt * 8.0
       );
 
-      // 2. Poll Scream Metric for Level 3 Boss (Voice scream OR repeated GRITAR button clicks)
+      // 2. Poll Scream Metric for Level 3 Boss (Microphone scream only on mobile; button allowed on desktop)
       if (currentLevel === 3) {
         const { audio } = sensorData;
         const pulse = sensorManager.consumeScreamPulse();
-        if (pulse > 0) {
+        // En la versión celular NO existe opción de matar al jefe con botón ni pulsos:
+        // Solo en computadora de escritorio se procesa el botón GRITAR.
+        if (isDesktopDevice() && pulse > 0) {
           screamAccumulator += pulse;
           buzzManager.playBossHurtSfx();
           sensorManager.triggerHaptic('bossHit');
           onScreamProgressRef.current(screamAccumulator);
         }
 
+        // El micrófono y el sonido real de la voz es el único método para matar al jefe en celular
         if (audio.isScreaming) {
           screamAccumulator += dt;
           onScreamProgressRef.current(screamAccumulator);

@@ -19,6 +19,7 @@ import { ParticleSystem } from '../entities/ParticleSystem';
 import { sensorManager } from '../sensors/SensorManager';
 import { buzzManager } from '../audio/SpatialBuzzManager';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
+import { isDesktopDevice } from '../utils/deviceDetection';
 
 // ==========================================
 // FRUIT NINJA SWIPE & SLICING INTERNAL TYPES & MANAGERS
@@ -1155,7 +1156,7 @@ const ThreeCanvasComponent: React.FC<ThreeCanvasProps> = ({
         // --- Boss scream mechanic in Level 3 ---
         if (stateRef.current.currentLevel === 3 && bossInstance && !bossInstance.isDead) {
           const pulse = sensorManager.consumeScreamPulse();
-          if (pulse > 0) {
+          if (isDesktopDevice() && pulse > 0) {
             accumulatedScreamTime += pulse;
             onScreamProgressRef.current(accumulatedScreamTime);
 

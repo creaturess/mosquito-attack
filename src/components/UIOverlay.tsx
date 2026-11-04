@@ -12,6 +12,7 @@ import React from 'react';
 import { Clock } from 'lucide-react';
 import { GameState } from './ThreeCanvas';
 import { sensorManager } from '../sensors/SensorManager';
+import { isDesktopDevice } from '../utils/deviceDetection';
 
 interface NearestMosquitoData {
   direction: 'left' | 'right' | 'behind' | 'center';
@@ -38,13 +39,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
   gameState,
 }) => {
 
-  const [isComputer, setIsComputer] = React.useState(false);
+  const [isComputer, setIsComputer] = React.useState(() => isDesktopDevice());
 
   React.useEffect(() => {
     const checkIsComputer = () => {
-      const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-      const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-      setIsComputer(Boolean(finePointer && (!hasTouch || window.innerWidth >= 1024)));
+      setIsComputer(isDesktopDevice());
     };
     checkIsComputer();
     window.addEventListener('resize', checkIsComputer);

@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { Play, RotateCcw, Trophy, Skull, Flame, ArrowRight } from 'lucide-react';
+import { isMobileDevice } from '../utils/deviceDetection';
 
 interface LevelModalProps {
   type: 'level_start' | 'level_win' | 'game_over' | 'game_won';
@@ -24,6 +25,14 @@ export const LevelModal: React.FC<LevelModalProps> = ({
   onRestart,
   onReturnToMenu,
 }) => {
+  const [isMobile, setIsMobile] = React.useState(() => isMobileDevice());
+
+  React.useEffect(() => {
+    const checkMobile = () => setIsMobile(isMobileDevice());
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   if (type === 'level_start') {
     return (
       <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
@@ -52,7 +61,10 @@ export const LevelModal: React.FC<LevelModalProps> = ({
             <p className="text-base font-extrabold text-white leading-relaxed">
               {level === 1 && 'Matá 20 mosquitos'}
               {level === 2 && '15 mosquitos, MENOS TIEMPO y MÁS RÁPIDOS'}
-              {level === 3 && '¡GRITÁ al micrófono o apretá muchas veces el botón GRITAR para matarlo!'}
+              {level === 3 &&
+                (isMobile
+                  ? '¡GRITÁ al micrófono del teléfono con todas tus fuerzas para matarlo!'
+                  : '¡GRITÁ al micrófono o apretá muchas veces el botón GRITAR para matarlo!')}
             </p>
           </div>
 
