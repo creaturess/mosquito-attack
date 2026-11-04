@@ -1243,7 +1243,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
 
       {/* Mobile Walking Guidance Badge */}
       <div
-        className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex sm:hidden items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/80 px-3.5 py-1.5 backdrop-blur-md text-[11px] font-semibold text-emerald-200 shadow-md text-center"
+        className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex sm:hidden items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/85 px-4 py-1.5 backdrop-blur-md text-[11px] font-semibold text-emerald-200 shadow-xl text-center max-w-[92vw]"
         style={{ transform: 'translate3d(-50%, 0, 0)' }}
       >
         <span>🧭 Mové el celular para rotar • 🕹️ Usá el joystick táctil para caminar</span>
@@ -1261,7 +1261,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         </button>
       )}
 
-      {/* Tactile Virtual Joystick for Traversing the Field (Positioned in the BOTTOM-CENTER for mobile) */}
+      {/* Tactile Virtual Joystick for Traversing the Field (Positioned higher towards the center, well above the instructions badge) */}
       {!isComputer && (
         <div
           data-no-swat="true"
@@ -1269,7 +1269,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
           onTouchMove={handleJoystickTouchMove}
           onTouchEnd={handleJoystickTouchEnd}
           onTouchCancel={handleJoystickTouchEnd}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
           style={{ transform: 'translate3d(-50%, 0, 0)' }}
         >
           <span className="absolute top-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▲</span>
