@@ -4,7 +4,7 @@ Además se puede jugar en un espacio virtual que es un campo low poly. Quisimos 
 
 Controles e interacciones disponibles:
 Utilizamos el giroscopio en el modo de la cámara frontal para girar la pantalla y así matar a los mosquitos. 
-También implementamos lo táctil para poder córtarlos y el micrófono en el nivel final. Usamos lo mismo para el espacio final, con el agrergado del acelerometro que te permite caminar en el juego tomando el movimiento de la caminata real.
+También implementamos lo táctil para poder córtarlos y el micrófono en el nivel final. 
 
 Créditos de los assets 3D/texturas utilizadas:
 Modelo 3D del Mosquito:
