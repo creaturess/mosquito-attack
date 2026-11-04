@@ -90,10 +90,10 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
       </div>
 
       {/* --- BOTTOM ROW: SCREAM BUTTON (LEVEL 3) --- */}
-      <div className="flex items-end justify-end w-full pointer-events-auto">
+      <div className={`flex items-end ${gameState.isARMode ? 'justify-end' : 'justify-start sm:justify-end [@media(hover:hover)_and_(pointer:fine)]:justify-end'} w-full pointer-events-auto`}>
         {/* Level 3 Scream Action Button */}
         {gameState.currentLevel === 3 && (
-          <div className="flex flex-col items-end gap-1.5">
+          <div className={`flex flex-col ${gameState.isARMode ? 'items-end' : 'items-start sm:items-end [@media(hover:hover)_and_(pointer:fine)]:items-end'} gap-1.5`}>
             <button
               data-no-swat="true"
               onClick={(e) => {

@@ -776,12 +776,21 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       const { orientation } = sensorData;
 
       // CAMERA ORIENTATION (GYROSCOPE ON MOBILE & MOUSE LOOK ON PC):
-      // When physical gyroscope hardware events are actively incoming, orientation follows phone.
-      // Mouse look is always applied so desktop PC can rotate the screen smoothly with mouse.
+      // In field mode, mobile gyroscope sensitivity is reduced (~40% less sensitive on yaw, ~50% on pitch)
+      // to eliminate over-rotation, sudden jerks, and hand tremors for a steady, comfortable experience.
       if (sensorManager.hasGyroData()) {
-        player.yaw = orientation.yawRad + manualLookRef.current.yaw;
-        player.pitch = Math.max(-1.3, Math.min(1.3, orientation.pitchRad + manualLookRef.current.pitch));
-        player.roll = orientation.rollRad;
+        const SENSITIVITY_YAW = 0.60;
+        const SENSITIVITY_PITCH = 0.50;
+        const SENSITIVITY_ROLL = 0.35;
+
+        const targetYaw = orientation.yawRad * SENSITIVITY_YAW + manualLookRef.current.yaw;
+        const targetPitch = Math.max(-1.2, Math.min(1.2, orientation.pitchRad * SENSITIVITY_PITCH + manualLookRef.current.pitch));
+        const targetRoll = orientation.rollRad * SENSITIVITY_ROLL;
+
+        // Smooth damping to cushion rapid hand movements and tremors
+        player.yaw = THREE.MathUtils.lerp(player.yaw, targetYaw, dt * 9.0);
+        player.pitch = THREE.MathUtils.lerp(player.pitch, targetPitch, dt * 9.0);
+        player.roll = THREE.MathUtils.lerp(player.roll, targetRoll, dt * 9.0);
       } else {
         player.yaw = manualLookRef.current.yaw;
         player.pitch = manualLookRef.current.pitch;
@@ -1232,7 +1241,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
         </button>
       )}
 
-      {/* Tactile Virtual Joystick for Traversing the Field (Visible on mobile/touch, hidden on computer) */}
+      {/* Tactile Virtual Joystick for Traversing the Field (Positioned on the RIGHT side for mobile) */}
       {!isComputer && (
         <div
           data-no-swat="true"
@@ -1240,7 +1249,7 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
           onTouchMove={handleJoystickTouchMove}
           onTouchEnd={handleJoystickTouchEnd}
           onTouchCancel={handleJoystickTouchEnd}
-          className="absolute bottom-6 left-5 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
+          className="absolute bottom-6 right-5 z-30 flex h-28 w-28 items-center justify-center rounded-full border-2 border-emerald-400/50 bg-black/60 backdrop-blur-md shadow-2xl active:border-emerald-400 select-none touch-none [@media(hover:hover)_and_(pointer:fine)]:!hidden"
           style={{ transform: 'translate3d(0, 0, 0)' }}
         >
           <span className="absolute top-1.5 text-[9px] text-emerald-400/70 font-black pointer-events-none select-none">▲</span>
