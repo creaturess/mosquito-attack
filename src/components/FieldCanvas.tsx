@@ -724,13 +724,33 @@ export const FieldCanvasComponent: React.FC<FieldCanvasProps> = ({
       if (totalSpawned >= targetKills) return;
 
       const id = `field_mosq_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const angle = Math.random() * Math.PI * 2;
-      // Close spawn distance so they arrive immediately
-      const spawnDist = currentLevel === 3 ? 14 : 8.5 + Math.random() * 5.0;
-      const sx = player.position.x + Math.cos(angle) * spawnDist;
-      const sz = player.position.z + Math.sin(angle) * spawnDist;
-      const groundY = getTerrainHeight(sx, sz);
-      const sy = groundY + (currentLevel === 3 ? 2.8 : 1.6 + Math.random() * 1.4);
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+
+      if (currentLevel === 3) {
+        // Boss Final: Aparece directamente en frente del jugador (a 4.8m), flotando estable en un lugar ("como antes")
+        const camDir = new THREE.Vector3(0, 0, -1);
+        _tempEuler.set(player.pitch, player.yaw, player.roll, 'YXZ');
+        _camQuat.setFromEuler(_tempEuler);
+        camDir.applyQuaternion(_camQuat);
+        camDir.y = 0;
+        if (camDir.lengthSq() > 0.001) camDir.normalize();
+        else camDir.set(0, 0, -1);
+
+        const spawnDist = 4.8;
+        sx = player.position.x + camDir.x * spawnDist;
+        sz = player.position.z + camDir.z * spawnDist;
+        const groundY = getTerrainHeight(sx, sz);
+        sy = Math.max(player.position.y + 0.3, groundY + 2.2);
+      } else {
+        const angle = Math.random() * Math.PI * 2;
+        const spawnDist = 8.5 + Math.random() * 5.0;
+        sx = player.position.x + Math.cos(angle) * spawnDist;
+        sz = player.position.z + Math.sin(angle) * spawnDist;
+        const groundY = getTerrainHeight(sx, sz);
+        sy = groundY + (1.6 + Math.random() * 1.4);
+      }
 
       const mosq = new FieldMosquito({
         id,

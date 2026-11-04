@@ -11,6 +11,8 @@
  * 6. Web Audio scream analysis for Level 3 Boss.
  */
 
+import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
+
 export interface SensorStatus {
   gyroscopeAllowed: boolean;
   gyroscopeActive: boolean;
@@ -106,7 +108,7 @@ export class SensorManager {
   private analyser: AnalyserNode | null = null;
   private freqDataArray: Uint8Array<ArrayBuffer> | null = null;
   private audioMetrics: AudioMetrics = { volume: 0, bassLevel: 0, isScreaming: false };
-  public screamThreshold: number = 0.62;
+  public screamThreshold: number = GAMEPLAY_CONFIG.audio?.screamThreshold ?? 0.48;
 
   // 8. AR Camera Passthrough
   private cameraStream: MediaStream | null = null;
@@ -616,20 +618,30 @@ export class SensorManager {
 
       let sum = 0;
       let bassSum = 0;
+      let vocalSum = 0;
       const len = this.freqDataArray.length;
       const bassCount = Math.min(8, len);
+      const vocalCount = Math.min(48, len); // Vocal fundamental + harmonic range (~100Hz to 6kHz)
 
       for (let i = 0; i < len; i++) {
-        sum += this.freqDataArray[i];
+        const val = this.freqDataArray[i];
+        sum += val;
         if (i < bassCount) {
-          bassSum += this.freqDataArray[i];
+          bassSum += val;
+        }
+        if (i < vocalCount) {
+          vocalSum += val;
         }
       }
 
       const rawVol = sum / (len * 255);
       const rawBass = bassSum / (bassCount * 255);
+      const rawVocal = vocalSum / (vocalCount * 255);
 
-      const smoothVol = Math.min(1.0, rawVol * 2.2);
+      // Extra sensitivity towards vocal frequencies and sound energy
+      const effectiveVol = Math.max(rawVol * 1.25, rawVocal * 1.15);
+      const mult = GAMEPLAY_CONFIG.audio?.volumeSensitivityMultiplier ?? 2.3;
+      const smoothVol = Math.min(1.0, effectiveVol * mult);
       const smoothBass = Math.min(1.0, rawBass * 1.8);
 
       this.audioMetrics.volume = smoothVol;
@@ -736,7 +748,7 @@ export class SensorManager {
       const source = audioCtx.createMediaStreamSource(stream);
       this.analyser = audioCtx.createAnalyser();
       this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = 0.45;
+      this.analyser.smoothingTimeConstant = 0.35;
       source.connect(this.analyser);
 
       this.freqDataArray = new Uint8Array(this.analyser.frequencyBinCount);

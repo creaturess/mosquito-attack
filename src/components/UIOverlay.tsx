@@ -38,6 +38,19 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
   gameState,
 }) => {
 
+  const [isComputer, setIsComputer] = React.useState(false);
+
+  React.useEffect(() => {
+    const checkIsComputer = () => {
+      const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      setIsComputer(Boolean(finePointer && (!hasTouch || window.innerWidth >= 1024)));
+    };
+    checkIsComputer();
+    window.addEventListener('resize', checkIsComputer);
+    return () => window.removeEventListener('resize', checkIsComputer);
+  }, []);
+
   const isCritical = gameState.timeLeft <= 5;
   const timerTextColor = isCritical
     ? 'text-red-500 animate-pulse font-black'
@@ -89,11 +102,10 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
         </div>
       </div>
 
-      {/* --- BOTTOM ROW: SCREAM BUTTON (LEVEL 3) --- */}
-      <div className={`flex items-end ${gameState.isARMode ? 'justify-end' : 'justify-start sm:justify-end [@media(hover:hover)_and_(pointer:fine)]:justify-end'} w-full pointer-events-auto`}>
-        {/* Level 3 Scream Action Button */}
-        {gameState.currentLevel === 3 && (
-          <div className={`flex flex-col ${gameState.isARMode ? 'items-end' : 'items-start sm:items-end [@media(hover:hover)_and_(pointer:fine)]:items-end'} gap-1.5`}>
+      {/* --- BOTTOM ROW: SCREAM BUTTON (LEVEL 3) - EXCLUSIVO PARA COMPUTADORA / PC --- */}
+      {gameState.currentLevel === 3 && isComputer && (
+        <div className="hidden sm:flex [@media(hover:hover)_and_(pointer:fine)]:flex items-end justify-end w-full pointer-events-auto">
+          <div className="flex flex-col items-end gap-1.5">
             <button
               data-no-swat="true"
               onClick={(e) => {
@@ -112,13 +124,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = React.memo(({
                   ¡GRITAR!
                 </span>
                 <span className="text-[10px] font-bold text-amber-200">
-                  Tocá muchas veces o mantené
+                  Hacé click rápido o mantené
                 </span>
               </div>
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 });

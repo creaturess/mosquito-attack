@@ -152,4 +152,14 @@ export const GAMEPLAY_CONFIG = {
     /** Tiempo de espera en segundos para reaparecer en el nido al ser eliminado */
     respawnDelaySec: 4.0,
   },
+
+  // ==========================================
+  // 6. DETECCIÓN DE AUDIO Y MICRÓFONO (NIVEL 3 JEFE)
+  // ==========================================
+  audio: {
+    /** Umbral de volumen para registrar grito contra el jefe final (0.0 a 1.0) - Más sensible y accesible */
+    screamThreshold: 0.48,
+    /** Multiplicador de sensibilidad de volumen */
+    volumeSensitivityMultiplier: 2.3,
+  },
 };

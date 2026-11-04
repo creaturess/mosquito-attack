@@ -88,18 +88,21 @@ export class FieldMosquito {
   // Materials & Scale
   public materials: THREE.Material[] = [];
   public baseScale: number;
+  public bossAnchorPos: THREE.Vector3;
 
   constructor(options: FieldMosquitoOptions) {
     this.id = options.id;
     this.isBoss = !!options.isBoss;
     this.level = options.level || 1;
+    this.bossAnchorPos = options.spawnPosition.clone();
 
     // Movement speeds and tighter orbits for Field Mode
     if (this.isBoss) {
-      this.baseSpeed = 4.8;
+      this.baseSpeed = 3.2;
       this.flapSpeed = 38;
       this.baseScale = 1.35;
-      this.orbitRadius = 2.2;
+      this.orbitRadius = 0;
+      this.orbitSpeed = 0;
     } else if (this.level === 2) {
       this.baseSpeed = 7.5; // Fast in Level 2
       this.flapSpeed = 68;
@@ -233,6 +236,72 @@ export class FieldMosquito {
     // Flight target computation using scratch vectors
     _toPlayer.copy(playerPos).sub(this.physicsPosition);
     const distToPlayer = _toPlayer.length();
+
+    // ----------------------------------------------------
+    // LEVEL 3 FINAL BOSS: FLOTANDO EN UN MISMO LUGAR
+    // (NO DA VUELTAS ALREDEDOR DEL JUGADOR - COMO ANTES)
+    // ----------------------------------------------------
+    if (this.isBoss) {
+      // Si el jugador se aleja mucho (> 6.5m), el ancla se ajusta suavemente para mantenerse a distancia cómoda
+      if (distToPlayer > 6.5 && distToPlayer > 0.01) {
+        const toNormX = _toPlayer.x / distToPlayer;
+        const toNormZ = _toPlayer.z / distToPlayer;
+        const targetAnchorX = playerPos.x - toNormX * 4.8;
+        const targetAnchorZ = playerPos.z - toNormZ * 4.8;
+        this.bossAnchorPos.x = THREE.MathUtils.lerp(this.bossAnchorPos.x, targetAnchorX, fixedDt * 1.5);
+        this.bossAnchorPos.z = THREE.MathUtils.lerp(this.bossAnchorPos.z, targetAnchorZ, fixedDt * 1.5);
+        this.bossAnchorPos.y = THREE.MathUtils.lerp(this.bossAnchorPos.y, playerPos.y + 0.3, fixedDt * 1.5);
+      }
+
+      // Flotación suave y respiración vertical en un mismo lugar (sin dar vueltas ni órbitas circulares)
+      const hoverY = this.bossAnchorPos.y + Math.sin(time * 1.5) * 0.18;
+      const hoverX = this.bossAnchorPos.x + Math.sin(time * 0.7) * 0.12;
+      const hoverZ = this.bossAnchorPos.z + Math.cos(time * 0.6) * 0.12;
+
+      _targetPoint.set(hoverX, hoverY, hoverZ);
+      this.dartOffset.set(0, 0, 0);
+
+      _desiredDir.copy(_targetPoint).sub(this.physicsPosition);
+      const distToAnchor = _desiredDir.length();
+      if (distToAnchor > 0.02) {
+        _desiredDir.normalize();
+        this.flightVelocity.lerp(_desiredDir.multiplyScalar(Math.min(3.5, distToAnchor * 3.0)), fixedDt * 5.0);
+      } else {
+        this.flightVelocity.multiplyScalar(0.85);
+      }
+
+      // Micro revoloteo sutil de insecto suspendido en el aire
+      const flutterX = Math.sin(time * 28 + this.flutterPhase) * 0.02;
+      const flutterY = Math.cos(time * 31 + this.flutterPhase) * 0.03;
+      const flutterZ = Math.sin(time * 25) * 0.02;
+
+      this.physicsPosition.addScaledVector(this.flightVelocity, fixedDt);
+      this.physicsPosition.x += flutterX;
+      this.physicsPosition.y += flutterY;
+      this.physicsPosition.z += flutterZ;
+
+      // Terreno: nunca atravesar el suelo
+      const terrainY = groundHeightAt(this.physicsPosition.x, this.physicsPosition.z);
+      if (this.physicsPosition.y < terrainY + 2.0) {
+        this.physicsPosition.y = THREE.MathUtils.lerp(this.physicsPosition.y, terrainY + 2.0, fixedDt * 6.0);
+      }
+
+      // Mira fijamente de frente hacia el jugador/cámara amenazantemente
+      _toPlayer.copy(playerPos).sub(this.physicsPosition);
+      if (_toPlayer.lengthSq() > 0.01) {
+        const faceYaw = Math.atan2(_toPlayer.x, _toPlayer.z) + Math.PI;
+        this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, faceYaw, fixedDt * 6.0);
+
+        const horizDist = Math.hypot(_toPlayer.x, _toPlayer.z);
+        const pitchTarget = Math.atan2(_toPlayer.y, Math.max(0.1, horizDist));
+        this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, THREE.MathUtils.clamp(pitchTarget, -0.25, 0.25), fixedDt * 5.0);
+
+        _scratchEuler.set(-this.currentPitch, this.currentYaw, 0, 'YXZ');
+        this.physicsQuat.setFromEuler(_scratchEuler);
+      }
+
+      return;
+    }
 
     if (this.isApproaching) {
       this.flightBlend = Math.max(0.0, this.flightBlend - fixedDt * 2.5);
